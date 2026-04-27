@@ -51,9 +51,8 @@ from config import CONFIG
 from src.dataset import GlaucomaDataset
 from src.evaluate import evaluate
 from src.model import DualHeadVGG19
-from src.allocation import assign_slots, make_K_list, solve_multislot_availability
+from src.allocation import assign_slots, make_K_list
 from src.losses import scheduling_cost_multislot
-from src.simulate_availability import simulate_availability
 
 logger = logging.getLogger(__name__)
 
@@ -149,12 +148,10 @@ def val_decision_cost(
     delay: torch.Tensor,
     d_miss: float,
     device: torch.device,
-    val_availability: np.ndarray,
 ) -> float:
     """
-    Light-touch validation criterion: availability-constrained scheduling cost on val set.
+    Light-touch validation criterion: multi-slot scheduling cost C(z*, Y) on val set.
     This is the ONLY place cost parameters enter M2b's pipeline.
-    val_availability must be the fixed (N_val, T) matrix loaded once before training.
     """
     model.eval()
     all_scores: list[torch.Tensor] = []
@@ -182,10 +179,7 @@ def val_decision_cost(
     labels = torch.cat(all_labels)
     N      = len(scores)
     K_list = make_K_list(N, K_frac_list)
-
-    scores_np = scores.numpy()
-    z_np      = solve_multislot_availability(scores_np, K_list, val_availability)
-    z         = torch.tensor(z_np, dtype=alpha.dtype)
+    z      = assign_slots(scores, K_list)
     return scheduling_cost_multislot(z, labels, alpha.cpu(), beta, delay.cpu(), d_miss).item()
 
 
@@ -239,19 +233,6 @@ def train_M2b(
     delay  = torch.tensor(CONFIG["delay"], dtype=torch.float32).to(device)
     d_miss = CONFIG["d_miss"]
 
-    # Load fixed val/test availability matrices (generated once by src/generate_availability.py).
-    val_avail_seed   = CONFIG["availability_seed_val"]
-    val_avail_path   = Path("data/availability") / f"val_availability_seed{val_avail_seed}.npy"
-    val_availability = np.load(val_avail_path)
-    logger.info("Loaded val availability: shape=%s, path=%s",
-                val_availability.shape, val_avail_path)
-
-    test_avail_seed   = CONFIG["availability_seed_test"]
-    test_avail_path   = Path("data/availability") / f"test_availability_seed{test_avail_seed}.npy"
-    test_availability = np.load(test_avail_path)
-    logger.info("Loaded test availability: shape=%s, path=%s",
-                test_availability.shape, test_avail_path)
-
     # ── Data ──────────────────────────────────────────────────────────────
     train_loader = make_loader(manifest_csv, "severity_train", CONFIG["batch_size"],
                                shuffle=True,  severity_fraction=severity_fraction,
@@ -267,7 +248,7 @@ def train_M2b(
     # ── Model: load M1 checkpoint ──────────────────────────────────────────
     # M2b differs from M2a here: initialise from M1 (trained backbone + trunk)
     # instead of plain ImageNet. Only severity_head is randomly initialised.
-    m1_ckpt = model_dir / f"M1_seed{seed}.pt"
+    m1_ckpt = model_dir / f"M1_v3_seed{seed}.pt"
     if not m1_ckpt.exists():
         raise FileNotFoundError(
             f"M1 checkpoint not found: {m1_ckpt}\n"
@@ -302,7 +283,7 @@ def train_M2b(
     #   before the severity_head has learned anything risks overwriting good features.
     # Phase 2: backbone unfrozen from layer 9, trunk unfrozen — same parameter-group
     #   structure as M2a so the two LR scales are applied correctly.
-    checkpoint_path = model_dir / f"M2b_seed{seed}.pt"
+    checkpoint_path = model_dir / f"M2b_v3_seed{seed}.pt"
     best_val_cost   = float("inf")
 
     # ── Phase 1: frozen backbone + frozen trunk ───────────────────────────
@@ -333,7 +314,7 @@ def train_M2b(
             n_batches  += 1
 
         train_loss /= max(n_batches, 1)
-        val_cost = val_decision_cost(model, val_loader, alpha, beta, CONFIG["K_frac_list"], delay, d_miss, device, val_availability)
+        val_cost = val_decision_cost(model, val_loader, alpha, beta, CONFIG["K_frac_list"], delay, d_miss, device)
         val_ce   = val_severity_ce(model, val_loader, device)
         logger.info("P1 Epoch %2d | train_ce=%.4f | val_ce=%.4f | val_cost=%.4f",
                     epoch, train_loss, val_ce, val_cost)
@@ -382,7 +363,7 @@ def train_M2b(
             n_batches  += 1
 
         train_loss /= max(n_batches, 1)
-        val_cost = val_decision_cost(model, val_loader, alpha, beta, CONFIG["K_frac_list"], delay, d_miss, device, val_availability)
+        val_cost = val_decision_cost(model, val_loader, alpha, beta, CONFIG["K_frac_list"], delay, d_miss, device)
         val_ce   = val_severity_ce(model, val_loader, device)
         logger.info("P2 Epoch %2d | train_ce=%.4f | val_ce=%.4f | val_cost=%.4f",
                     epoch, train_loss, val_ce, val_cost)
@@ -431,15 +412,15 @@ def train_M2b(
     })
     pred_df["true_severity"] = pred_df["true_severity"].astype(int)
 
-    pred_csv = output_dir / f"M2b_seed{seed}.csv"
+    pred_csv = output_dir / f"M2b_v3_seed{seed}.csv"
     pred_df.to_csv(pred_csv, index=False)
     logger.info("Predictions saved → %s  (%d rows)", pred_csv, len(pred_df))
 
-    # Auto-evaluate with availability constraints so metrics are comparable to M1/M3.
+    # Auto-evaluate and save metrics JSON alongside predictions.
     metrics = evaluate(pred_csv, alpha=CONFIG["alpha"], beta=CONFIG["beta"],
                        K_frac_list=CONFIG["K_frac_list"], delay=CONFIG["delay"],
-                       d_miss=CONFIG["d_miss"], availability=test_availability)
-    metrics_path = output_dir / f"M2b_seed{seed}_metrics.json"
+                       d_miss=CONFIG["d_miss"])
+    metrics_path = output_dir / f"M2b_v3_seed{seed}_metrics.json"
     with open(metrics_path, "w") as f:
         json.dump(metrics, f, indent=2)
     logger.info("Metrics saved → %s", metrics_path)
@@ -461,8 +442,8 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--seed",               type=int,   default=42)
     p.add_argument("--severity-fraction",  type=float, default=1.0,
                    help="Fraction of severity labels to use (Exp 2 scarcity sweep)")
-    p.add_argument("--output-dir", default="/data/lizhiwei/dfl_v2/results/")
-    p.add_argument("--model-dir",  default="/data/lizhiwei/dfl_v2/models/")
+    p.add_argument("--output-dir", default="/data/lizhiwei/dfl_v2/results_v3/")
+    p.add_argument("--model-dir",  default="/data/lizhiwei/dfl_v2/models_v3/")
     p.add_argument("--log-level",  default="INFO",
                    choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     p.add_argument("--smoke-test",  action="store_true",

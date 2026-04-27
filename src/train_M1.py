@@ -1,20 +1,27 @@
 """
+Train M1 v3: Binary-Only Baseline — Phase 2 trunk LR fix.
+
+Difference from train_M1.py (v2):
+  Phase 2 trunk+head uses lr_head (1e-4) instead of lr_trunk_phase2 (~8.89e-6).
+  Rationale: the trunk is still mid-training after Phase 1 (20 epochs). Unlike
+  the Keras model — which loaded a fully-trained trunk before fine-tuning — our
+  trunk needs to keep converging at the same rate as Phase 1, not at the near-zero
+  Keras fine-tuning rate designed for an already-converged model.
+
 Train M1: Binary-Only Baseline (current clinical practice).
 
 Training:
   - VGG19 fine-tuned on binary_train split using binary cross-entropy.
-  - Phase 2 trunk+head uses lr_head (1e-4) so the trunk keeps converging at the same
-    rate as Phase 1 (unlike the Keras fine-tuning LR which was designed for an
-    already-converged model).
-  - Backbone frozen up to fine_tune_at (layer 9); severity_head frozen throughout.
+  - Backbone frozen up to fine_tune_at (from TF hyperparams); only binary_head and
+    the unfrozen feature layers are trained. severity_head is frozen throughout.
   - Balanced class weights compensate for the glaucoma class imbalance.
-  - Early stopping on binary_val split binary CE.
+  - Early stopping on binary_val split binary CE. Best checkpoint is restored at the end.
 
 Triage score: σ(binary_logit) = P(glaucoma).
 
 Output:
-  models/M1_seed{seed}.pt       — best model checkpoint
-  results/M1_seed{seed}.csv     — prediction CSV for evaluate.py
+  models/M1_v3_seed{seed}.pt       — best model checkpoint
+  results/M1_v3_seed{seed}.csv     — prediction CSV for evaluate.py
       columns: patient_id, triage_score, true_severity
 
 Usage:
@@ -234,7 +241,7 @@ def train_M1(
     #   Trunk+head: lr_head (1e-4) — still mid-training after Phase 1; unlike the
     #   Keras model (which loaded a fully-trained trunk before fine-tuning), our
     #   trunk must continue converging at Phase 1's rate.
-    checkpoint_path = model_dir / f"M1_seed{seed}.pt"
+    checkpoint_path = model_dir / f"M1_v3_seed{seed}.pt"
     best_val_loss   = float("inf")
 
     # ── Phase 1: frozen backbone ──────────────────────────────────────────
@@ -358,7 +365,7 @@ def train_M1(
     })
     pred_df["true_severity"] = pred_df["true_severity"].astype(int)
 
-    pred_csv = output_dir / f"M1_seed{seed}.csv"
+    pred_csv = output_dir / f"M1_v3_seed{seed}.csv"
     pred_df.to_csv(pred_csv, index=False)
     logger.info("Predictions saved → %s  (%d rows)", pred_csv, len(pred_df))
 
@@ -366,7 +373,7 @@ def train_M1(
     metrics = evaluate(pred_csv, alpha=CONFIG["alpha"], beta=CONFIG["beta"],
                        K_frac_list=CONFIG["K_frac_list"], delay=CONFIG["delay"],
                        d_miss=CONFIG["d_miss"])
-    metrics_path = output_dir / f"M1_seed{seed}_metrics.json"
+    metrics_path = output_dir / f"M1_v3_seed{seed}_metrics.json"
     with open(metrics_path, "w") as f:
         json.dump(metrics, f, indent=2)
     logger.info("Metrics saved → %s", metrics_path)
@@ -386,8 +393,8 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--manifest",    default="/data/lizhiwei/dfl_v2/manifest.csv",
                    help="Path to manifest CSV from data_pipeline_v2.py")
     p.add_argument("--seed",        type=int, default=42)
-    p.add_argument("--output-dir",  default="/data/lizhiwei/dfl_v2/results/")
-    p.add_argument("--model-dir",   default="/data/lizhiwei/dfl_v2/models/")
+    p.add_argument("--output-dir",  default="/data/lizhiwei/dfl_v2/results_v3/")
+    p.add_argument("--model-dir",   default="/data/lizhiwei/dfl_v2/models_v3/")
     p.add_argument("--log-level",   default="INFO",
                    choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     p.add_argument("--smoke-test",  action="store_true",

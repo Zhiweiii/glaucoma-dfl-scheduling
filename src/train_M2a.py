@@ -268,7 +268,7 @@ def train_M2a(
     # Phase 2: backbone unfrozen from layer 9 — backbone at lr_finetune (slow,
     #   pretrained), trunk + severity_head at lr_stage2 (fast, adapting).
     #   Uses parameter groups so the two LR scales are applied correctly.
-    checkpoint_path = model_dir / f"M2a_seed{seed}.pt"
+    checkpoint_path = model_dir / f"M2a_v3_seed{seed}.pt"
     best_val_cost   = float("inf")
 
     # ── Phase 1: frozen backbone ──────────────────────────────────────────
@@ -390,14 +390,14 @@ def train_M2a(
     })
     pred_df["true_severity"] = pred_df["true_severity"].astype(int)
 
-    pred_csv = output_dir / f"M2a_seed{seed}.csv"
+    pred_csv = output_dir / f"M2a_v3_seed{seed}.csv"
     pred_df.to_csv(pred_csv, index=False)
     logger.info("Predictions saved → %s  (%d rows)", pred_csv, len(pred_df))
 
     metrics = evaluate(pred_csv, alpha=CONFIG["alpha"], beta=CONFIG["beta"],
                        K_frac_list=CONFIG["K_frac_list"], delay=CONFIG["delay"],
                        d_miss=CONFIG["d_miss"])
-    metrics_path = output_dir / f"M2a_seed{seed}_metrics.json"
+    metrics_path = output_dir / f"M2a_v3_seed{seed}_metrics.json"
     with open(metrics_path, "w") as f:
         json.dump(metrics, f, indent=2)
     logger.info("Metrics saved → %s", metrics_path)
@@ -419,8 +419,8 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--seed",               type=int,   default=42)
     p.add_argument("--severity-fraction",  type=float, default=1.0,
                    help="Fraction of severity labels to use (Exp 2 scarcity sweep)")
-    p.add_argument("--output-dir", default="/data/lizhiwei/dfl_v2/results/")
-    p.add_argument("--model-dir",  default="/data/lizhiwei/dfl_v2/models/")
+    p.add_argument("--output-dir", default="/data/lizhiwei/dfl_v2/results_v3/")
+    p.add_argument("--model-dir",  default="/data/lizhiwei/dfl_v2/models_v3/")
     p.add_argument("--log-level",  default="INFO",
                    choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     p.add_argument("--smoke-test",  action="store_true",
@@ -450,4 +450,4 @@ if __name__ == "__main__":
     )
     print(f"\nDone. Predictions → {pred_csv}")
     print(f"Next: python src/evaluate.py --predictions {pred_csv} "
-          f"--output results/M2a_seed{args.seed}_metrics.json")  # noqa: E501
+          f"--output results/M2a_seed{args.seed}_metrics.json")

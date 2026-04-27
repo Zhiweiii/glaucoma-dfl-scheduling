@@ -36,10 +36,8 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import roc_auc_score
 
-from src.allocation import solve_multislot_availability
 
-
-# ── Allocation solver (numpy — unconstrained, evaluation only) ───────────────
+# ── Allocation solver (numpy — evaluation only) ───────────────────────────────
 
 def assign_slots(scores: np.ndarray, K_frac_list: list[float]) -> np.ndarray:
     """
@@ -103,20 +101,10 @@ def oracle_cost(
     beta: float,
     K_frac_list: list[float],
     d_miss: float,
-    availability: np.ndarray | None = None,
 ) -> float:
-    """
-    Lower bound: oracle knows true severity and assigns greedily by α_{Yi}.
-    When availability is provided, uses the availability-constrained solver so
-    the oracle is subject to the same feasibility constraints as the models.
-    """
+    """Lower bound: oracle knows true severity and assigns greedily by α_{Yi}."""
     oracle_scores = np.array(alpha)[true_severity.astype(int)].astype(float)
-    N      = len(oracle_scores)
-    K_list = [max(1, int(f * N)) for f in K_frac_list]
-    if availability is not None:
-        z_oracle = solve_multislot_availability(oracle_scores, K_list, availability)
-    else:
-        z_oracle = assign_slots(oracle_scores, K_frac_list)
+    z_oracle = assign_slots(oracle_scores, K_frac_list)
     return scheduling_cost(z_oracle, true_severity, alpha, delay, beta, d_miss)
 
 
@@ -129,40 +117,27 @@ def random_cost(
     d_miss: float,
     n_samples: int = 1000,
     seed: int = 0,
-    availability: np.ndarray | None = None,
 ) -> float:
     """
-    Expected cost under random multi-slot assignment (Monte Carlo).
+    Expected cost under uniformly random multi-slot assignment (Monte Carlo).
     This is a reference quantity for normalisation, NOT a method.
-
-    When availability is provided, each random sample also uses the
-    availability-constrained solver so C_random is on the same feasibility
-    footing as the models (making C_norm = C_total / C_random meaningful).
     """
-    N      = len(true_severity)
+    rng = np.random.RandomState(seed)
+    N   = len(true_severity)
+    T   = len(K_frac_list)
     K_list = [min(max(1, int(f * N)), N) for f in K_frac_list]
-    costs  = []
-
-    if availability is not None:
-        for s in range(n_samples):
-            rng = np.random.RandomState(seed * 10000 + s)
-            z   = solve_multislot_availability(rng.rand(N), K_list, availability)
-            costs.append(scheduling_cost(z, true_severity, alpha, delay, beta, d_miss))
-    else:
-        rng = np.random.RandomState(seed)
-        T   = len(K_frac_list)
-        for _ in range(n_samples):
-            perm   = rng.permutation(N)
-            z      = np.zeros((N, T))
-            offset = 0
-            for t, Kt in enumerate(K_list):
-                avail = min(Kt, N - offset)
-                if avail <= 0:
-                    break
-                z[perm[offset : offset + avail], t] = 1.0
-                offset += avail
-            costs.append(scheduling_cost(z, true_severity, alpha, delay, beta, d_miss))
-
+    costs = []
+    for _ in range(n_samples):
+        perm = rng.permutation(N)
+        z = np.zeros((N, T))
+        offset = 0
+        for t, Kt in enumerate(K_list):
+            avail = min(Kt, N - offset)
+            if avail <= 0:
+                break
+            z[perm[offset : offset + avail], t] = 1.0
+            offset += avail
+        costs.append(scheduling_cost(z, true_severity, alpha, delay, beta, d_miss))
     return float(np.mean(costs))
 
 
@@ -207,7 +182,6 @@ def evaluate(
     K_frac_list: list[float] | None = None,
     d_miss: float = 15.0,
     n_random: int = 1000,
-    availability: np.ndarray | None = None,
 ) -> dict:
     """
     Compute all scheduling metrics from a prediction CSV.
@@ -215,16 +189,12 @@ def evaluate(
 
     Args:
         predictions_csv: path to CSV with (patient_id, triage_score, true_severity)
-        alpha:        missed-referral costs [α_0…α_4]     (default [0,1,3,6,10])
-        delay:        per-slot delay weights               (default [1.0,3.0,8.0])
-        beta:         per-referral cost                    (default 0.5)
-        K_frac_list:  per-slot capacity fractions          (default [0.10,0.20,0.30])
-        d_miss:       unscheduled patient penalty          (default 15.0)
-        n_random:     MC samples for the random baseline
-        availability: optional (N, T) int array.  When provided, model/oracle/random
-                      all use the availability-constrained solver so C_norm is
-                      comparable across methods.  Pass the same matrix to all models
-                      being compared.  None → unconstrained (v3 behaviour).
+        alpha:       missed-referral costs [α_0…α_4]     (default [0,1,3,6,10])
+        delay:       per-slot delay weights               (default [1.0,3.0,8.0])
+        beta:        per-referral cost                    (default 0.5)
+        K_frac_list: per-slot capacity fractions          (default [0.10,0.20,0.30])
+        d_miss:      unscheduled patient penalty          (default 15.0)
+        n_random:    MC samples for the random baseline
 
     Returns dict with keys:
         N, K_list, C_total, C_oracle, C_random,
@@ -250,14 +220,10 @@ def evaluate(
     N      = len(scores)
     K_list = [max(1, int(np.floor(f * N))) for f in K_frac_list]
 
-    if availability is not None:
-        z_model = solve_multislot_availability(scores, K_list, availability)
-    else:
-        z_model = assign_slots(scores, K_frac_list)
+    z_model  = assign_slots(scores, K_frac_list)
     C_total  = scheduling_cost(z_model, labels, alpha, delay, beta, d_miss)
-    C_oracle = oracle_cost(labels, alpha, delay, beta, K_frac_list, d_miss, availability)
-    C_rand   = random_cost(labels, alpha, delay, beta, K_frac_list, d_miss, n_random,
-                           availability=availability)
+    C_oracle = oracle_cost(labels, alpha, delay, beta, K_frac_list, d_miss)
+    C_rand   = random_cost(labels, alpha, delay, beta, K_frac_list, d_miss, n_random)
 
     binary_labels = (labels > 0).astype(int)
     auc = float(roc_auc_score(binary_labels, scores)) if binary_labels.sum() > 0 else float("nan")
@@ -292,9 +258,6 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--beta",        type=float, default=0.5)
     p.add_argument("--K_frac_list", nargs="+", type=float, default=[0.05, 0.10, 0.20])
     p.add_argument("--n_random",    type=int,   default=1000)
-    p.add_argument("--availability", default=None,
-                   help="Path to .npy availability matrix (N, T). "
-                        "If given, model/oracle/random all use availability-constrained solver.")
     p.add_argument("--output",      required=True, help="Output JSON path")
     return p.parse_args()
 
@@ -302,7 +265,6 @@ def _parse_args() -> argparse.Namespace:
 if __name__ == "__main__":
     args = _parse_args()
     Path(args.output).parent.mkdir(parents=True, exist_ok=True)
-    availability = np.load(args.availability) if args.availability else None
     metrics = evaluate(
         args.predictions,
         alpha=args.alpha,
@@ -311,7 +273,6 @@ if __name__ == "__main__":
         K_frac_list=args.K_frac_list,
         d_miss=args.d_miss,
         n_random=args.n_random,
-        availability=availability,
     )
     print(json.dumps(metrics, indent=2))
     with open(args.output, "w") as f:

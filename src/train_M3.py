@@ -56,9 +56,8 @@ from config import CONFIG
 from src.dataset import GlaucomaDataset
 from src.evaluate import evaluate
 from src.model import DualHeadVGG19
-from src.allocation import assign_slots, make_K_list, solve_multislot_availability
+from src.allocation import assign_slots, make_K_list
 from src.losses import scheduling_cost_multislot
-from src.simulate_availability import simulate_availability
 
 logger = logging.getLogger(__name__)
 
@@ -181,7 +180,6 @@ def dfl_step(
 
     N      = n_sev
     K_list = make_K_list(N, K_frac_list)
-    T      = len(K_frac_list)
 
     # Accumulate perturbation gradient estimate entirely in no_grad.
     # Score-function identity: ∇_α̂ E_ε[C] = (1/σ) E_ε[C · ε]
@@ -189,13 +187,6 @@ def dfl_step(
     #   ĝ ≈ (1/Mσ) Σ_m (C_m/N − baseline) · ε_m
     # Dividing by N removes batch-size dependence; subtracting the MC mean
     # baseline reduces variance without biasing the estimator.
-    #
-    # Availability: sample once for this batch (seed=None → stochastic each call),
-    # then share the SAME matrix across all M perturbations so the gradient measures
-    # "what happens when scores change, holding constraints fixed."
-    # CRITICAL: sized for n_sev (the severity-labeled subset), not the full batch.
-    avail_batch = simulate_availability(N, T, p_available=CONFIG["p_available"], seed=None)
-
     with torch.no_grad():
         ahat_d = alpha_hat.detach()
         costs: list[torch.Tensor] = []
@@ -204,10 +195,7 @@ def dfl_step(
         for _ in range(M):
             eps       = torch.randn_like(ahat_d)             # ε ~ N(0, I)
             perturbed = ahat_d + sigma * eps
-            z_m_np    = solve_multislot_availability(
-                perturbed.cpu().numpy(), K_list, avail_batch
-            )
-            z_m       = torch.tensor(z_m_np, dtype=alpha.dtype, device=device)
+            z_m       = assign_slots(perturbed, K_list)
             cost_m    = scheduling_cost_multislot(z_m, sev_labels[mask], alpha, beta, delay, d_miss) / N
             costs.append(cost_m)
             eps_list.append(eps)
@@ -236,11 +224,10 @@ def val_decision_cost(
     delay: torch.Tensor,
     d_miss: float,
     device: torch.device,
-    val_availability: np.ndarray,
 ) -> float:
     """
-    Light-touch validation criterion: availability-constrained scheduling cost on val set.
-    val_availability must be the fixed (N_val, T) matrix loaded once before training.
+    Light-touch validation criterion: multi-slot scheduling cost C(z*, Y) on all
+    severity-labeled val patients as one scheduling period.
     """
     model.eval()
     all_scores: list[torch.Tensor] = []
@@ -268,10 +255,7 @@ def val_decision_cost(
     labels = torch.cat(all_labels)
     N      = len(scores)
     K_list = make_K_list(N, K_frac_list)
-
-    scores_np = scores.numpy()
-    z_np      = solve_multislot_availability(scores_np, K_list, val_availability)
-    z         = torch.tensor(z_np, dtype=alpha.dtype)
+    z      = assign_slots(scores, K_list)
     return scheduling_cost_multislot(z, labels, alpha.cpu(), beta, delay.cpu(), d_miss).item()
 
 
@@ -325,19 +309,6 @@ def train_M3(
     delay  = torch.tensor(CONFIG["delay"], dtype=torch.float32).to(device)
     d_miss = CONFIG["d_miss"]
 
-    # Load fixed val/test availability matrices (generated once by src/generate_availability.py).
-    val_avail_seed   = CONFIG["availability_seed_val"]
-    val_avail_path   = Path("data/availability") / f"val_availability_seed{val_avail_seed}.npy"
-    val_availability = np.load(val_avail_path)
-    logger.info("Loaded val availability: shape=%s, path=%s",
-                val_availability.shape, val_avail_path)
-
-    test_avail_seed   = CONFIG["availability_seed_test"]
-    test_avail_path   = Path("data/availability") / f"test_availability_seed{test_avail_seed}.npy"
-    test_availability = np.load(test_avail_path)
-    logger.info("Loaded test availability: shape=%s, path=%s",
-                test_availability.shape, test_avail_path)
-
     # ── Data ──────────────────────────────────────────────────────────────
     train_loader = make_loader(manifest_csv, "severity_train", CONFIG["batch_size"],
                                shuffle=True, severity_fraction=severity_fraction,
@@ -351,7 +322,7 @@ def train_M3(
                 len(train_loader), len(val_loader), len(test_loader))
 
     # ── Model: load M1 checkpoint ──────────────────────────────────────────
-    m1_ckpt = model_dir / f"M1_seed{seed}.pt"
+    m1_ckpt = model_dir / f"M1_v3_seed{seed}.pt"
     if not m1_ckpt.exists():
         raise FileNotFoundError(
             f"M1 checkpoint not found: {m1_ckpt}\n"
@@ -368,7 +339,7 @@ def train_M3(
     # ── Stage 2: Severity CE — identical to M2b ────────────────────────────
     # Two-phase approach to avoid gradient noise from the randomly-initialised
     # severity head corrupting the already-trained backbone and trunk.
-    stage2_ckpt   = model_dir / f"M3_stage2_seed{seed}.pt"
+    stage2_ckpt   = model_dir / f"M3_v3_stage2_seed{seed}.pt"
     best_val_cost = float("inf")
 
     # ── Stage 2, Phase 1: backbone + trunk frozen, only severity_head trains ──
@@ -404,7 +375,7 @@ def train_M3(
             n_batches  += 1
 
         train_loss /= max(n_batches, 1)
-        val_cost = val_decision_cost(model, val_loader, alpha, beta, CONFIG["K_frac_list"], delay, d_miss, device, val_availability)
+        val_cost = val_decision_cost(model, val_loader, alpha, beta, CONFIG["K_frac_list"], delay, d_miss, device)
         val_ce   = val_severity_ce(model, val_loader, device)
         logger.info("S2P1 Epoch %2d | train_ce=%.4f | val_ce=%.4f | val_cost=%.4f",
                     epoch, train_loss, val_ce, val_cost)
@@ -455,7 +426,7 @@ def train_M3(
             n_batches  += 1
 
         train_loss /= max(n_batches, 1)
-        val_cost = val_decision_cost(model, val_loader, alpha, beta, CONFIG["K_frac_list"], delay, d_miss, device, val_availability)
+        val_cost = val_decision_cost(model, val_loader, alpha, beta, CONFIG["K_frac_list"], delay, d_miss, device)
         val_ce   = val_severity_ce(model, val_loader, device)
         logger.info("S2P2 Epoch %2d | train_ce=%.4f | val_ce=%.4f | val_cost=%.4f",
                     epoch, train_loss, val_ce, val_cost)
@@ -487,7 +458,7 @@ def train_M3(
     # `final_ckpt` is pre-populated with Stage 2 best as a fallback.
     # Stage 3 overwrites it only when val cost improves, so the final model
     # is at least as good as Stage 2.
-    final_ckpt = model_dir / f"M3_seed{seed}.pt"
+    final_ckpt = model_dir / f"M3_v3_seed{seed}.pt"
     shutil.copy2(stage2_ckpt, final_ckpt)
     logger.info("Stage 3 fallback initialised from Stage 2 best (%.4f)", best_val_cost)
 
@@ -525,7 +496,7 @@ def train_M3(
             n_batches  += 1
 
         train_surr /= max(n_batches, 1)
-        val_cost = val_decision_cost(model, val_loader, alpha, beta, CONFIG["K_frac_list"], delay, d_miss, device, val_availability)
+        val_cost = val_decision_cost(model, val_loader, alpha, beta, CONFIG["K_frac_list"], delay, d_miss, device)
         logger.info("S3 Epoch %2d | train_surrogate=%.4f | val_cost=%.4f",
                     epoch, train_surr, val_cost)
 
@@ -577,14 +548,14 @@ def train_M3(
     })
     pred_df["true_severity"] = pred_df["true_severity"].astype(int)
 
-    pred_csv = output_dir / f"M3_seed{seed}.csv"
+    pred_csv = output_dir / f"M3_v3_seed{seed}.csv"
     pred_df.to_csv(pred_csv, index=False)
     logger.info("Predictions saved → %s  (%d rows)", pred_csv, len(pred_df))
 
     metrics = evaluate(pred_csv, alpha=CONFIG["alpha"], beta=CONFIG["beta"],
                        K_frac_list=CONFIG["K_frac_list"], delay=CONFIG["delay"],
-                       d_miss=CONFIG["d_miss"], availability=test_availability)
-    metrics_path = output_dir / f"M3_seed{seed}_metrics.json"
+                       d_miss=CONFIG["d_miss"])
+    metrics_path = output_dir / f"M3_v3_seed{seed}_metrics.json"
     with open(metrics_path, "w") as f:
         json.dump(metrics, f, indent=2)
     logger.info("Metrics saved → %s", metrics_path)
@@ -606,8 +577,8 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--seed",              type=int,   default=42)
     p.add_argument("--severity-fraction", type=float, default=1.0,
                    help="Fraction of severity labels to use (Exp 2 scarcity sweep)")
-    p.add_argument("--output-dir", default="/data/lizhiwei/dfl_v2/results/")
-    p.add_argument("--model-dir",  default="/data/lizhiwei/dfl_v2/models/")
+    p.add_argument("--output-dir", default="/data/lizhiwei/dfl_v2/results_v3/")
+    p.add_argument("--model-dir",  default="/data/lizhiwei/dfl_v2/models_v3/")
     p.add_argument("--log-level",  default="INFO",
                    choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     p.add_argument("--smoke-test",  action="store_true",

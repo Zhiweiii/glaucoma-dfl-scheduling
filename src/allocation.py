@@ -1,13 +1,10 @@
 """
-Multi-slot scheduling solvers.
+Multi-slot scheduling solver (PyTorch).
 
-assign_slots                 — PyTorch (torch Tensor in/out); used in M3 Stage 3
-                               backward pass.
-solve_multislot_availability — numpy (ndarray in/out); used in evaluate.py, M2b/M3
-                               val criterion, and M3 DFL gradient loop (after
-                               .detach().cpu().numpy()).
+assign_slots is used:
+  - at test time by ALL methods (M1, M2, M3)
+  - during training ONLY by M3 Stage 3 (inside the DFL loss)
 """
-import numpy as np
 import torch
 
 
@@ -46,44 +43,5 @@ def assign_slots(scores: torch.Tensor, K_list: list[int]) -> torch.Tensor:
         start = end
         if start >= N:
             break
-
-    return z
-
-
-def solve_multislot_availability(
-    scores: np.ndarray,
-    K_list: list[int],
-    availability: np.ndarray,
-) -> np.ndarray:
-    """
-    Greedy multi-slot assignment with availability constraints (numpy).
-
-    Slots are processed in increasing index order (t=0 first, t=T-1 last).
-    With delay=[1.0, 3.0, 8.0] this fills the lowest-delay slot first, matching
-    the unconstrained assign_slots behaviour so the all-ones regression test holds.
-
-    Args:
-        scores:       (N,) float array — higher score = more urgent
-        K_list:       list of T ints, capacity per slot
-        availability: (N, T) int array; 1 = patient i may be assigned to slot t
-
-    Returns:
-        z: (N, T) int array; z[i, t] = 1 iff patient i assigned to slot t
-    """
-    N = len(scores)
-    T = len(K_list)
-    z        = np.zeros((N, T), dtype=int)
-    assigned = np.zeros(N, dtype=bool)
-
-    for t in range(T):
-        eligible     = (~assigned) & (availability[:, t] == 1)
-        eligible_idx = np.where(eligible)[0]
-        if len(eligible_idx) == 0:
-            continue
-        sorted_eligible = eligible_idx[np.argsort(-scores[eligible_idx])]
-        n_assign = min(K_list[t], len(sorted_eligible))
-        for idx in sorted_eligible[:n_assign]:
-            z[idx, t]  = 1
-            assigned[idx] = True
 
     return z

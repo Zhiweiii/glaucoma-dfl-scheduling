@@ -24,11 +24,6 @@ CONFIG = {
     "d_miss":      15.0,                       # penalty for unscheduled patients
     "K_frac_list": [0.05, 0.10, 0.20],        # capacity per slot as fraction of N
 
-    # ── Availability constraints ───────────────────────────────────────────
-    "p_available":          0.7,   # Bernoulli prob each patient is available per slot
-    "availability_seed_val":  100, # seed for fixed val availability matrix
-    "availability_seed_test": 200, # seed for fixed test availability matrix
-
     # ── Architecture ──────────────────────────────────────────────────────
     # Trunk dropout, activation, and fine_tune_at are hardcoded in model.py
     # to match Keras exactly; only these shared config keys are needed here.
