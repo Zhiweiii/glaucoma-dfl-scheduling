@@ -37,7 +37,7 @@ Bag structure (Image-based datasets):
 
 Usage
 -----
-    python src/catalog/data_pipeline_v2.py --output-dir data/
+    python src/dataset_construction/data_pipeline_v2.py --output-dir data/
 """
 
 from __future__ import annotations

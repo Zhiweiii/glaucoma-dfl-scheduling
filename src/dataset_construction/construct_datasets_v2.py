@@ -22,10 +22,10 @@ Key differences from construct_datasets.py (v1):
 Usage
 -----
     # Dry-run — print counts, no catalog writes
-    python src/catalog/construct_datasets_v2.py --dry-run
+    python src/dataset_construction/construct_datasets_v2.py --dry-run
 
     # Create all 6 datasets
-    python src/catalog/construct_datasets_v2.py
+    python src/dataset_construction/construct_datasets_v2.py
 """
 from __future__ import annotations
 
