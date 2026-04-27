@@ -22,14 +22,16 @@ The new code expects `M1_seed{seed}.pt` (no `_v3` suffix).
 Run once per seed:
 
 ```bash
-cp /data/lizhiwei/dfl_v2/models/M1_v3_seed42.pt \
+mkdir -p /data/lizhiwei/dfl_v2/models
+
+cp /data/lizhiwei/dfl_v2/models_v3/M1_v3_seed42.pt \
    /data/lizhiwei/dfl_v2/models/M1_seed42.pt
 
 # Repeat for other seeds if needed
-cp /data/lizhiwei/dfl_v2/models/M1_v3_seed43.pt \
+cp /data/lizhiwei/dfl_v2/models_v3/M1_v3_seed43.pt \
    /data/lizhiwei/dfl_v2/models/M1_seed43.pt
 
-cp /data/lizhiwei/dfl_v2/models/M1_v3_seed44.pt \
+cp /data/lizhiwei/dfl_v2/models_v3/M1_v3_seed44.pt \
    /data/lizhiwei/dfl_v2/models/M1_seed44.pt
 ```
 

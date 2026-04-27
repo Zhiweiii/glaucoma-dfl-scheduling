@@ -208,6 +208,7 @@ def evaluate(
     d_miss: float = 15.0,
     n_random: int = 1000,
     availability: np.ndarray | None = None,
+    severity_only: bool = True,
 ) -> dict:
     """
     Compute all scheduling metrics from a prediction CSV.
@@ -225,6 +226,12 @@ def evaluate(
                       all use the availability-constrained solver so C_norm is
                       comparable across methods.  Pass the same matrix to all models
                       being compared.  None → unconstrained (v3 behaviour).
+                      When severity_only=True, this array must be pre-filtered to
+                      the same severity 1–4 rows before being passed here.
+        severity_only: if True (default), restrict evaluation to true_severity >= 1.
+                      Excludes grade-0 patients whose ranking is trivially correct due
+                      to cohort-level imaging differences (see docs/cohort_confound_issue.md).
+                      AUC reports severe (Y≥3) vs mild (Y=1,2) discrimination.
 
     Returns dict with keys:
         N, K_list, C_total, C_oracle, C_random,
@@ -245,10 +252,20 @@ def evaluate(
     if missing:
         raise ValueError(f"Prediction CSV is missing columns: {missing}")
 
+    if severity_only:
+        df = df[df["true_severity"] >= 1].reset_index(drop=True)
+
     scores = df["triage_score"].values.astype(float)
     labels = df["true_severity"].values.astype(int)
     N      = len(scores)
     K_list = [max(1, int(np.floor(f * N))) for f in K_frac_list]
+
+    if availability is not None and len(availability) != N:
+        raise ValueError(
+            f"availability has {len(availability)} rows but filtered predictions have {N}. "
+            "When severity_only=True, pre-filter the availability matrix to the same "
+            "severity 1–4 rows before passing it (see docs/cohort_confound_issue.md)."
+        )
 
     if availability is not None:
         z_model = solve_multislot_availability(scores, K_list, availability)
@@ -259,8 +276,13 @@ def evaluate(
     C_rand   = random_cost(labels, alpha, delay, beta, K_frac_list, d_miss, n_random,
                            availability=availability)
 
-    binary_labels = (labels > 0).astype(int)
-    auc = float(roc_auc_score(binary_labels, scores)) if binary_labels.sum() > 0 else float("nan")
+    if severity_only:
+        # AUC: severe (Y≥3) vs mild (Y=1,2); grade-0 excluded above
+        binary_labels = (labels >= 3).astype(int)
+    else:
+        binary_labels = (labels > 0).astype(int)
+    n_pos = binary_labels.sum()
+    auc = float(roc_auc_score(binary_labels, scores)) if 0 < n_pos < len(binary_labels) else float("nan")
 
     return {
         "N":                 N,
@@ -294,7 +316,13 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--n_random",    type=int,   default=1000)
     p.add_argument("--availability", default=None,
                    help="Path to .npy availability matrix (N, T). "
-                        "If given, model/oracle/random all use availability-constrained solver.")
+                        "If given, model/oracle/random all use availability-constrained solver. "
+                        "When --severity-only, this matrix must be pre-filtered to severity 1–4 rows.")
+    p.add_argument("--severity-only", dest="severity_only", action="store_true", default=True,
+                   help="Evaluate on severity 1–4 only, excluding grade-0 patients "
+                        "(recommended; see docs/cohort_confound_issue.md)")
+    p.add_argument("--no-severity-only", dest="severity_only", action="store_false",
+                   help="Include all severity levels (grade-0 through 4) in evaluation")
     p.add_argument("--output",      required=True, help="Output JSON path")
     return p.parse_args()
 
@@ -312,6 +340,7 @@ if __name__ == "__main__":
         d_miss=args.d_miss,
         n_random=args.n_random,
         availability=availability,
+        severity_only=args.severity_only,
     )
     print(json.dumps(metrics, indent=2))
     with open(args.output, "w") as f:
