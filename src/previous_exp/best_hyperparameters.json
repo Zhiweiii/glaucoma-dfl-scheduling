@@ -1,0 +1,23 @@
+{
+    "rotation_range": -2,
+    "width_shift_range": 0.041246611943877,
+    "height_shift_range": 0.09178175185007667,
+    "horizontal_flip": true,
+    "vertical_flip": true,
+    "zoom_range": -0.03288698236980494,
+    "brightness_range": -0.006611207735048985,
+    "use_class_weights": true,
+    "pooling": "flatten",
+    "dense_layers": 2,
+    "units_layer_0": 64,
+    "activation_func_0": "elu",
+    "batch_norm_0": true,
+    "dropout_0": 0.12282600983943151,
+    "units_layer_1": 128,
+    "activation_func_1": "tanh",
+    "batch_norm_1": true,
+    "dropout_1": 0.35522833054288,
+    "fine_tune_at": 9,
+    "fine_tuning_learning_rate_adam": 8.894489649572761e-06,
+    "batch_size": 32
+}

@@ -1,0 +1,17 @@
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+dist/
+
+# Runtime outputs (generated; not source)
+results/
+models/
+
+# Data — large files managed outside git
+data/availability/*.npy
+data/*.csv

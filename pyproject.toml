@@ -1,0 +1,77 @@
+
+[project]
+name = "glaucoma-dfl-scheduling"
+dynamic = ["version"]
+authors = [
+    {name = "ISRD", email = "isrd-dev@isi.edu"},
+]
+description = "Decision-focused learning for glaucoma triage using EyeAI data"
+readme = "README.md"
+requires-python = ">=3.12"
+
+dependencies = [
+    "eye-ai",
+    "notebook>=7.4.7",
+]
+
+[project.optional-dependencies]
+torch = [
+    "torch>=2.0.0",
+    "torchvision>=0.15.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "pytest-coverage",
+    "ruff",
+    "ipython"
+]
+
+jupyter = ["ipykernel", "jupyter"]  # optional extras for local dev
+torch = ["torch>=2.0.0", "torchvision>=0.15.0"]
+
+
+[tool.uv]
+python-preference = "only-managed"
+default-groups = ["dev", "jupyter"]
+package = true
+
+[tool.uv.pip]
+torch-backend = "auto"
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[[tool.uv.index]]
+# Update this for whatever version of CUDA you are using.
+name = "pytorch-cuda"
+url = "https://download.pytorch.org/whl/cu124"
+explicit = true
+
+[tool.uv.sources]
+deriva-ml = { git = "https://github.com/informatics-isi-edu/deriva-ml.git" }
+eye-ai = { git = "https://github.com/eye-ai-usc/eye-ai-ml.git"}
+torch = { index = "pytorch-cuda" }
+torchvision = { index = "pytorch-cuda" }
+
+[tool.setuptools_scm]
+version_scheme = "post-release"
+
+[tool.bumpversion]
+parse = "(?P<major>\\d+)\\.(?P<minor>\\d+)\\.(?P<patch>\\d+)"
+serialize = ["{major}.{minor}.{patch}"]
+tag = true
+tag_name = "v{new_version}"
+tag_message = "Bump version: {current_version} → {new_version}"
+message = "Bump version: {current_version} → {new_version}"
+
+[build-system]
+requires = ["setuptools>=45", "setuptools_scm[toml]>=6.2", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[metadata]
+license = "Apache 2.0"
+keywords = ["deriva-ml"]
