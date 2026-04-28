@@ -58,10 +58,11 @@ CONFIG = {
     "epochs_stage2": 30,
 
     # ── Stage 3: DFL fine-tuning  (M3 only) ───────────────────────────────
-    "lr_stage3":     1e-5,
-    "epochs_stage3": 20,
-    "sigma": 0.1,   # perturbation noise std for randomised smoothing
-    "M":     20,    # Monte Carlo samples per training step
+    "lr_stage3":         1e-5,
+    "epochs_stage3":     20,
+    "sigma":             0.1,   # perturbation noise std for randomised smoothing
+    "M":                 20,    # Monte Carlo samples per training step
+    "batch_size_stage3": 256,   # larger batch → K_list [12,25,51] vs test [16,33,66]
 
     # ── Common ─────────────────────────────────────────────────────────────
     "patience":   10,

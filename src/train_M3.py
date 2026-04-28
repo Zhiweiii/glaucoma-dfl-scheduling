@@ -342,13 +342,18 @@ def train_M3(
     train_loader = make_loader(manifest_csv, "severity_train", CONFIG["batch_size"],
                                shuffle=True, severity_fraction=severity_fraction,
                                seed=seed, drop_last=True)
+    # Stage 3 uses a larger batch so K_list ≈ [12, 25, 51] (vs [1,3,6] at batch_size=32),
+    # giving a richer DFL gradient signal closer to the test-time problem [16, 33, 66].
+    dfl_loader   = make_loader(manifest_csv, "severity_train", CONFIG["batch_size_stage3"],
+                               shuffle=True, severity_fraction=severity_fraction,
+                               seed=seed, drop_last=True)
     val_loader   = make_loader(manifest_csv, "severity_val",   CONFIG["batch_size"],
                                shuffle=False)
     test_loader  = make_loader(manifest_csv, "severity_test",  CONFIG["batch_size"],
                                shuffle=False)
 
-    logger.info("Train batches: %d | Val batches: %d | Test batches: %d",
-                len(train_loader), len(val_loader), len(test_loader))
+    logger.info("Train batches: %d | DFL batches: %d | Val batches: %d | Test batches: %d",
+                len(train_loader), len(dfl_loader), len(val_loader), len(test_loader))
 
     # ── Model: load M1 checkpoint ──────────────────────────────────────────
     m1_ckpt = model_dir / f"M1_seed{seed}.pt"
@@ -510,7 +515,7 @@ def train_M3(
     for epoch in range(CONFIG["epochs_stage3"]):
         model.train()
         train_surr, n_batches = 0.0, 0
-        for imgs, _, sev_labels, has_severity in train_loader:
+        for imgs, _, sev_labels, has_severity in dfl_loader:
             optimizer.zero_grad()
             loss = dfl_step(
                 model, imgs, sev_labels, has_severity,
