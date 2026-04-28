@@ -184,6 +184,13 @@ def train_M1(
 
     logger.info("=== M1  seed=%d  device=%s ===", seed, device)
 
+    # Load fixed test availability matrix (generated once by src/generate_availability.py).
+    test_avail_seed   = CONFIG["availability_seed_test"]
+    test_avail_path   = Path("data/availability") / f"test_availability_seed{test_avail_seed}.npy"
+    test_availability = np.load(test_avail_path)
+    logger.info("Loaded test availability: shape=%s, path=%s",
+                test_availability.shape, test_avail_path)
+
     # ── Data ──────────────────────────────────────────────────────────────
     pos_weight = compute_pos_weight(manifest_csv)
     logger.info("pos_weight (class imbalance): %.3f", pos_weight.item())
@@ -362,10 +369,13 @@ def train_M1(
     pred_df.to_csv(pred_csv, index=False)
     logger.info("Predictions saved → %s  (%d rows)", pred_csv, len(pred_df))
 
-    # Auto-evaluate and save metrics JSON alongside predictions.
+    # Evaluate on severity 1–4 only (exclude grade-0; see docs/cohort_confound_issue.md).
+    # Pre-filter the availability matrix to the same rows so shapes match.
+    sev_mask = (test_ds.df["label"] >= 1).values
     metrics = evaluate(pred_csv, alpha=CONFIG["alpha"], beta=CONFIG["beta"],
                        K_frac_list=CONFIG["K_frac_list"], delay=CONFIG["delay"],
-                       d_miss=CONFIG["d_miss"])
+                       d_miss=CONFIG["d_miss"], availability=test_availability[sev_mask],
+                       severity_only=True)
     metrics_path = output_dir / f"M1_seed{seed}_metrics.json"
     with open(metrics_path, "w") as f:
         json.dump(metrics, f, indent=2)

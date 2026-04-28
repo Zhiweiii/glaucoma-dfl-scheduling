@@ -47,7 +47,7 @@ from config import CONFIG
 from src.dataset import GlaucomaDataset
 from src.evaluate import evaluate
 from src.model import DualHeadVGG19
-from src.allocation import assign_slots, make_K_list
+from src.allocation import make_K_list, solve_multislot_availability
 from src.losses import scheduling_cost_multislot
 
 logger = logging.getLogger(__name__)
@@ -144,10 +144,11 @@ def val_decision_cost(
     delay: torch.Tensor,
     d_miss: float,
     device: torch.device,
+    val_availability: np.ndarray,
 ) -> float:
     """
-    Light-touch validation criterion: multi-slot scheduling cost C(z*, Y) on val set.
-    This is the ONLY place cost parameters enter M2's pipeline.
+    Light-touch validation criterion: availability-constrained scheduling cost on val set.
+    val_availability must be the fixed (N_val, T) matrix loaded once before training.
     """
     model.eval()
     all_scores: list[torch.Tensor] = []
@@ -171,11 +172,13 @@ def val_decision_cost(
         logger.warning("No severity-labeled samples in val — returning inf cost")
         return float("inf")
 
-    scores = torch.cat(all_scores)
-    labels = torch.cat(all_labels)
-    N      = len(scores)
-    K_list = make_K_list(N, K_frac_list)
-    z      = assign_slots(scores, K_list)
+    scores    = torch.cat(all_scores)
+    labels    = torch.cat(all_labels)
+    N         = len(scores)
+    K_list    = make_K_list(N, K_frac_list)
+    scores_np = scores.numpy()
+    z_np      = solve_multislot_availability(scores_np, K_list, val_availability)
+    z         = torch.tensor(z_np, dtype=alpha.dtype)
     return scheduling_cost_multislot(z, labels, alpha.cpu(), beta, delay.cpu(), d_miss).item()
 
 
@@ -228,6 +231,19 @@ def train_M2a(
     beta   = CONFIG["beta"]
     delay  = torch.tensor(CONFIG["delay"], dtype=torch.float32).to(device)
     d_miss = CONFIG["d_miss"]
+
+    # Load fixed val/test availability matrices (generated once by src/generate_availability.py).
+    val_avail_seed   = CONFIG["availability_seed_val"]
+    val_avail_path   = Path("data/availability") / f"val_availability_seed{val_avail_seed}.npy"
+    val_availability = np.load(val_avail_path)
+    logger.info("Loaded val availability: shape=%s, path=%s",
+                val_availability.shape, val_avail_path)
+
+    test_avail_seed   = CONFIG["availability_seed_test"]
+    test_avail_path   = Path("data/availability") / f"test_availability_seed{test_avail_seed}.npy"
+    test_availability = np.load(test_avail_path)
+    logger.info("Loaded test availability: shape=%s, path=%s",
+                test_availability.shape, test_avail_path)
 
     # ── Data ──────────────────────────────────────────────────────────────
     train_loader = make_loader(manifest_csv, "severity_train", CONFIG["batch_size"],
@@ -294,7 +310,7 @@ def train_M2a(
             n_batches  += 1
 
         train_loss /= max(n_batches, 1)
-        val_cost = val_decision_cost(model, val_loader, alpha, beta, CONFIG["K_frac_list"], delay, d_miss, device)
+        val_cost = val_decision_cost(model, val_loader, alpha, beta, CONFIG["K_frac_list"], delay, d_miss, device, val_availability)
         val_ce   = val_severity_ce(model, val_loader, device)
         logger.info("P1 Epoch %2d | train_ce=%.4f | val_ce=%.4f | val_cost=%.4f",
                     epoch, train_loss, val_ce, val_cost)
@@ -341,7 +357,7 @@ def train_M2a(
             n_batches  += 1
 
         train_loss /= max(n_batches, 1)
-        val_cost = val_decision_cost(model, val_loader, alpha, beta, CONFIG["K_frac_list"], delay, d_miss, device)
+        val_cost = val_decision_cost(model, val_loader, alpha, beta, CONFIG["K_frac_list"], delay, d_miss, device, val_availability)
         val_ce   = val_severity_ce(model, val_loader, device)
         logger.info("P2 Epoch %2d | train_ce=%.4f | val_ce=%.4f | val_cost=%.4f",
                     epoch, train_loss, val_ce, val_cost)
@@ -394,9 +410,13 @@ def train_M2a(
     pred_df.to_csv(pred_csv, index=False)
     logger.info("Predictions saved → %s  (%d rows)", pred_csv, len(pred_df))
 
+    # Evaluate on severity 1–4 only (exclude grade-0; see docs/cohort_confound_issue.md).
+    # Pre-filter the availability matrix to the same rows so shapes match.
+    sev_mask = (test_ds.df["label"] >= 1).values
     metrics = evaluate(pred_csv, alpha=CONFIG["alpha"], beta=CONFIG["beta"],
                        K_frac_list=CONFIG["K_frac_list"], delay=CONFIG["delay"],
-                       d_miss=CONFIG["d_miss"])
+                       d_miss=CONFIG["d_miss"], availability=test_availability[sev_mask],
+                       severity_only=True)
     metrics_path = output_dir / f"M2a_seed{seed}_metrics.json"
     with open(metrics_path, "w") as f:
         json.dump(metrics, f, indent=2)

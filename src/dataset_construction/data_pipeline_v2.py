@@ -57,6 +57,7 @@ logger = logging.getLogger(__name__)
 STUDY_DATASETS = {
     "binary_train":   "5-Z9GT",
     "binary_val":     "5-ZHRE",
+    "binary_test":    "5-ZMGJ",
     "severity_train": "5-ZQ8P",
     "severity_val":   "5-ZVMT",
     "severity_test":  "5-ZWR2",
@@ -301,6 +302,7 @@ def run_pipeline(args: argparse.Namespace) -> Path:
     configs = [
         ("binary_train",   False),
         ("binary_val",     False),
+        ("binary_test",    False),
         ("severity_train", True),
         ("severity_val",   True),
         ("severity_test",  True),
