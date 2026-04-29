@@ -148,7 +148,8 @@ def val_decision_cost(
 ) -> float:
     """
     Light-touch validation criterion: availability-constrained scheduling cost on val set.
-    val_availability must be the fixed (N_val, T) matrix loaded once before training.
+    val_availability must be pre-filtered to severity>=1 rows (same subset as test).
+    Evaluates on severity 1–4 only so K_list matches the test-time problem size.
     """
     model.eval()
     all_scores: list[torch.Tensor] = []
@@ -159,7 +160,7 @@ def val_decision_cost(
             imgs         = imgs.to(device)
             sev_labels   = sev_labels.to(device)
             has_severity = has_severity.to(device)
-            mask = has_severity & (sev_labels >= 0)
+            mask = has_severity & (sev_labels >= 1)
             if mask.sum() == 0:
                 continue
             _, sev_logits = model(imgs[mask])
@@ -254,6 +255,12 @@ def train_M2a(
     test_loader  = make_loader(manifest_csv, "severity_test",  CONFIG["batch_size"],
                                shuffle=False)
 
+    # Filter val availability to severity>=1 rows so K_list matches the test problem.
+    val_sev_mask         = (val_loader.dataset.df["label"] >= 1).values
+    val_availability_sev = val_availability[val_sev_mask]
+    logger.info("Val severity-only: %d / %d patients (val_decision_cost)",
+                int(val_sev_mask.sum()), len(val_sev_mask))
+
     logger.info("Train batches: %d | Val batches: %d | Test batches: %d",
                 len(train_loader), len(val_loader), len(test_loader))
 
@@ -310,7 +317,7 @@ def train_M2a(
             n_batches  += 1
 
         train_loss /= max(n_batches, 1)
-        val_cost = val_decision_cost(model, val_loader, alpha, beta, CONFIG["K_frac_list"], delay, d_miss, device, val_availability)
+        val_cost = val_decision_cost(model, val_loader, alpha, beta, CONFIG["K_frac_list"], delay, d_miss, device, val_availability_sev)
         val_ce   = val_severity_ce(model, val_loader, device)
         logger.info("P1 Epoch %2d | train_ce=%.4f | val_ce=%.4f | val_cost=%.4f",
                     epoch, train_loss, val_ce, val_cost)
@@ -357,7 +364,7 @@ def train_M2a(
             n_batches  += 1
 
         train_loss /= max(n_batches, 1)
-        val_cost = val_decision_cost(model, val_loader, alpha, beta, CONFIG["K_frac_list"], delay, d_miss, device, val_availability)
+        val_cost = val_decision_cost(model, val_loader, alpha, beta, CONFIG["K_frac_list"], delay, d_miss, device, val_availability_sev)
         val_ce   = val_severity_ce(model, val_loader, device)
         logger.info("P2 Epoch %2d | train_ce=%.4f | val_ce=%.4f | val_cost=%.4f",
                     epoch, train_loss, val_ce, val_cost)

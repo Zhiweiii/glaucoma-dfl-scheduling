@@ -240,7 +240,8 @@ def val_decision_cost(
 ) -> float:
     """
     Light-touch validation criterion: availability-constrained scheduling cost on val set.
-    val_availability must be the fixed (N_val, T) matrix loaded once before training.
+    val_availability must be pre-filtered to severity>=1 rows (same subset as test).
+    Evaluates on severity 1–4 only so K_list matches the test-time problem size.
     """
     model.eval()
     all_scores: list[torch.Tensor] = []
@@ -251,7 +252,7 @@ def val_decision_cost(
             imgs         = imgs.to(device)
             sev_labels   = sev_labels.to(device)
             has_severity = has_severity.to(device)
-            mask = has_severity & (sev_labels >= 0)
+            mask = has_severity & (sev_labels >= 1)
             if mask.sum() == 0:
                 continue
             _, sev_logits = model(imgs[mask])
@@ -352,6 +353,12 @@ def train_M3(
     test_loader  = make_loader(manifest_csv, "severity_test",  CONFIG["batch_size"],
                                shuffle=False)
 
+    # Filter val availability to severity>=1 rows so K_list matches the test problem.
+    val_sev_mask         = (val_loader.dataset.df["label"] >= 1).values
+    val_availability_sev = val_availability[val_sev_mask]
+    logger.info("Val severity-only: %d / %d patients (val_decision_cost)",
+                int(val_sev_mask.sum()), len(val_sev_mask))
+
     logger.info("Train batches: %d | DFL batches: %d | Val batches: %d | Test batches: %d",
                 len(train_loader), len(dfl_loader), len(val_loader), len(test_loader))
 
@@ -376,27 +383,25 @@ def train_M3(
     stage2_ckpt   = model_dir / f"M3_stage2_seed{seed}.pt"
     best_val_cost = float("inf")
 
-    # ── Stage 2, Phase 1: backbone + trunk frozen, only severity_head trains ──
+    # ── Stage 2, Phase 1: backbone frozen, trunk + severity_head train ──
     model.freeze_all_backbone()
-    for p in model.trunk.parameters():
-        p.requires_grad = False
+    # trunk stays trainable (Option A): it must shift from binary to severity
+    # discrimination and needs all 30 epochs, same as M2a/M2b.
     p1_trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     logger.info(
-        "=== M3 Stage2-Ph1: severity_head only | trainable=%d | lr=%.2e | epochs=%d ===",
+        "=== M3 Stage2-Ph1: trunk+severity_head | trainable=%d | lr=%.2e | epochs=%d ===",
         p1_trainable, CONFIG["lr_head"], CONFIG["epochs_phase1"],
     )
 
-    optimizer    = torch.optim.Adam(list(model.severity_head.parameters()),
-                                    lr=CONFIG["lr_head"])
+    optimizer    = torch.optim.Adam(
+        list(model.trunk.parameters()) + list(model.severity_head.parameters()),
+        lr=CONFIG["lr_head"],
+    )
     patience_ctr = 0
 
     for epoch in range(CONFIG["epochs_phase1"]):
         model.train()
-        # Backbone and trunk are parameter-frozen but model.train() would still update
-        # their BN running stats and activate Dropout, corrupting M1-warmed trunk stats.
-        model.features.eval()
-        model.trunk.eval()
-        model.severity_head.train()
+        model.features.eval()   # backbone frozen — keep BN stats fixed
         train_loss, n_batches = 0.0, 0
         for imgs, _, sev_labels, has_severity in train_loader:
             optimizer.zero_grad()
@@ -409,7 +414,7 @@ def train_M3(
             n_batches  += 1
 
         train_loss /= max(n_batches, 1)
-        val_cost = val_decision_cost(model, val_loader, alpha, beta, CONFIG["K_frac_list"], delay, d_miss, device, val_availability)
+        val_cost = val_decision_cost(model, val_loader, alpha, beta, CONFIG["K_frac_list"], delay, d_miss, device, val_availability_sev)
         val_ce   = val_severity_ce(model, val_loader, device)
         logger.info("S2P1 Epoch %2d | train_ce=%.4f | val_ce=%.4f | val_cost=%.4f",
                     epoch, train_loss, val_ce, val_cost)
@@ -460,7 +465,7 @@ def train_M3(
             n_batches  += 1
 
         train_loss /= max(n_batches, 1)
-        val_cost = val_decision_cost(model, val_loader, alpha, beta, CONFIG["K_frac_list"], delay, d_miss, device, val_availability)
+        val_cost = val_decision_cost(model, val_loader, alpha, beta, CONFIG["K_frac_list"], delay, d_miss, device, val_availability_sev)
         val_ce   = val_severity_ce(model, val_loader, device)
         logger.info("S2P2 Epoch %2d | train_ce=%.4f | val_ce=%.4f | val_cost=%.4f",
                     epoch, train_loss, val_ce, val_cost)
@@ -530,7 +535,7 @@ def train_M3(
             n_batches  += 1
 
         train_surr /= max(n_batches, 1)
-        val_cost = val_decision_cost(model, val_loader, alpha, beta, CONFIG["K_frac_list"], delay, d_miss, device, val_availability)
+        val_cost = val_decision_cost(model, val_loader, alpha, beta, CONFIG["K_frac_list"], delay, d_miss, device, val_availability_sev)
         logger.info("S3 Epoch %2d | train_surrogate=%.4f | val_cost=%.4f",
                     epoch, train_surr, val_cost)
 
