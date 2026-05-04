@@ -151,7 +151,7 @@ def val_binary_ce(
     model.eval()
     total, n = 0.0, 0
     with torch.no_grad():
-        for imgs, binary_labels, _, _ in loader:
+        for imgs, binary_labels, _, _, _ in loader:
             imgs = imgs.to(device)
             binary_labels = binary_labels.to(device).float()
             mask = binary_labels >= 0
@@ -170,6 +170,7 @@ def train_M1(
     seed: int = 42,
     output_dir: str | Path = "results",
     model_dir: str | Path = "models",
+    avail_dir: str | Path = "/data/lizhiwei/dfl_v2/v5/availability",
 ) -> Path:
     """
     Train M1 and write results/M1_seed{seed}.csv.
@@ -185,8 +186,9 @@ def train_M1(
     logger.info("=== M1  seed=%d  device=%s ===", seed, device)
 
     # Load fixed test availability matrix (generated once by src/generate_availability.py).
+    avail_dir         = Path(avail_dir)
     test_avail_seed   = CONFIG["availability_seed_test"]
-    test_avail_path   = Path("data/availability") / f"test_availability_seed{test_avail_seed}.npy"
+    test_avail_path   = avail_dir / f"test_availability_seed{test_avail_seed}.npy"
     test_availability = np.load(test_avail_path)
     logger.info("Loaded test availability: shape=%s, path=%s",
                 test_availability.shape, test_avail_path)
@@ -226,7 +228,7 @@ def train_M1(
     p1_trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     logger.info("Phase 1 trainable: %d", p1_trainable)
 
-    _imgs, _lbl, _, _ = next(iter(train_loader))
+    _imgs, _lbl, _, _, _ = next(iter(train_loader))
     logger.info("Data sanity | shape=%s range=[%.1f, %.1f]",
                 tuple(_imgs.shape), _imgs.min().item(), _imgs.max().item())
     _valid = _lbl[_lbl >= 0]
@@ -256,7 +258,7 @@ def train_M1(
     for epoch in range(CONFIG["epochs_phase1"]):
         model.train()
         train_loss, n_batches = 0.0, 0
-        for imgs, binary_labels, _, _ in train_loader:
+        for imgs, binary_labels, _, _, _ in train_loader:
             imgs          = imgs.to(device)
             binary_labels = binary_labels.to(device).float()
             mask          = binary_labels >= 0
@@ -304,7 +306,7 @@ def train_M1(
     for epoch in range(epochs_phase2):
         model.train()
         train_loss, n_batches = 0.0, 0
-        for imgs, binary_labels, _, _ in train_loader:
+        for imgs, binary_labels, _, _, _ in train_loader:
             imgs          = imgs.to(device)
             binary_labels = binary_labels.to(device).float()
             mask          = binary_labels >= 0
@@ -346,7 +348,7 @@ def train_M1(
 
     all_scores: list[float] = []
     with torch.no_grad():
-        for imgs, _, _, _ in test_loader:
+        for imgs, _, _, _, _ in test_loader:
             logits, _ = model(imgs.to(device))
             # M1 triage score = σ(logit) ∈ [0,1].
             # M2/M3 will use α̂ = Σ α_k·p_k ∈ [0,10].
@@ -396,8 +398,10 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--manifest",    default="/data/lizhiwei/dfl_v2/manifest.csv",
                    help="Path to manifest CSV from data_pipeline_v2.py")
     p.add_argument("--seed",        type=int, default=42)
-    p.add_argument("--output-dir",  default="/data/lizhiwei/dfl_v2/results/")
-    p.add_argument("--model-dir",   default="/data/lizhiwei/dfl_v2/models/")
+    p.add_argument("--output-dir",  default="/data/lizhiwei/dfl_v2/v5/results/")
+    p.add_argument("--model-dir",   default="/data/lizhiwei/dfl_v2/v5/models/")
+    p.add_argument("--avail-dir",   default="/data/lizhiwei/dfl_v2/v5/availability/",
+                   help="Directory containing pre-generated availability .npy files")
     p.add_argument("--log-level",   default="INFO",
                    choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     p.add_argument("--smoke-test",  action="store_true",
@@ -423,5 +427,6 @@ if __name__ == "__main__":
         seed=args.seed,
         output_dir=args.output_dir,
         model_dir=args.model_dir,
+        avail_dir=args.avail_dir,
     )
     print(f"\nDone. Predictions → {pred_csv}")

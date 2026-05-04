@@ -1,5 +1,5 @@
 """
-Run once before any training to generate and save fixed val/test availability matrices.
+Run once before any training to generate and save fixed train/val/test availability matrices.
 
 Usage:
     python src/generate_availability.py --manifest data/manifest.csv
@@ -32,9 +32,10 @@ def main() -> None:
                    help="Bernoulli availability probability")
     p.add_argument("--T",           type=int,   default=3,
                    help="Number of scheduling slots")
+    p.add_argument("--seed-train",  type=int,   default=0)
     p.add_argument("--seed-val",    type=int,   default=100)
     p.add_argument("--seed-test",   type=int,   default=200)
-    p.add_argument("--out-dir",     default="data/availability")
+    p.add_argument("--out-dir",     default="/data/lizhiwei/dfl_v2/v5/availability")
     args = p.parse_args()
 
     df = pd.read_csv(args.manifest)
@@ -42,8 +43,9 @@ def main() -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     splits = {
-        "val":  ("severity_val",  args.seed_val),
-        "test": ("severity_test", args.seed_test),
+        "train": ("severity_train", args.seed_train),
+        "val":   ("severity_val",   args.seed_val),
+        "test":  ("severity_test",  args.seed_test),
     }
 
     for name, (split_name, seed) in splits.items():

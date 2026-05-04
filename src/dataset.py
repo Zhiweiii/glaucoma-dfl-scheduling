@@ -132,6 +132,7 @@ class GlaucomaDataset(Dataset):
             torch.tensor(binary_label,   dtype=torch.long),
             torch.tensor(severity_label, dtype=torch.long),
             torch.tensor(has_severity,   dtype=torch.bool),
+            idx,
         )
 
 

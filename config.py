@@ -25,9 +25,10 @@ CONFIG = {
     "K_frac_list": [0.05, 0.10, 0.20],        # capacity per slot as fraction of N
 
     # ── Availability constraints ───────────────────────────────────────────
-    "p_available":          0.7,   # Bernoulli prob each patient is available per slot
-    "availability_seed_val":  100, # seed for fixed val availability matrix
-    "availability_seed_test": 200, # seed for fixed test availability matrix
+    "p_available":           0.7,   # Bernoulli prob each patient is available per slot
+    "availability_seed_train":  0,  # seed for fixed train availability matrix
+    "availability_seed_val":  100,  # seed for fixed val availability matrix
+    "availability_seed_test": 200,  # seed for fixed test availability matrix
 
     # ── Architecture ──────────────────────────────────────────────────────
     # Trunk dropout, activation, and fine_tune_at are hardcoded in model.py
@@ -60,7 +61,7 @@ CONFIG = {
     # ── Stage 3: DFL fine-tuning  (M3 only) ───────────────────────────────
     "lr_stage3":         1e-5,
     "epochs_stage3":     20,
-    "sigma":             0.1,   # perturbation noise std for randomised smoothing
+    "sigma":             0.5,   # perturbation noise std for randomised smoothing
     "M":                 20,    # Monte Carlo samples per training step
     "batch_size_stage3": 256,   # larger batch → K_list [12,25,51] vs test [16,33,66]
 

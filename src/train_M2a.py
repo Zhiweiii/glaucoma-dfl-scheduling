@@ -156,7 +156,7 @@ def val_decision_cost(
     all_labels: list[torch.Tensor] = []
 
     with torch.no_grad():
-        for imgs, _, sev_labels, has_severity in loader:
+        for imgs, _, sev_labels, has_severity, _ in loader:
             imgs         = imgs.to(device)
             sev_labels   = sev_labels.to(device)
             has_severity = has_severity.to(device)
@@ -192,7 +192,7 @@ def val_severity_ce(
     model.eval()
     total, n = 0.0, 0
     with torch.no_grad():
-        for imgs, _, sev_labels, has_severity in loader:
+        for imgs, _, sev_labels, has_severity, _ in loader:
             imgs         = imgs.to(device)
             sev_labels   = sev_labels.to(device)
             has_severity = has_severity.to(device)
@@ -213,6 +213,7 @@ def train_M2a(
     severity_fraction: float = 1.0,
     output_dir: str | Path = "results",
     model_dir: str | Path = "models",
+    avail_dir: str | Path = "/data/lizhiwei/dfl_v2/v5/availability",
 ) -> Path:
     """
     Train M2a and write results/M2a_seed{seed}.csv.
@@ -234,14 +235,15 @@ def train_M2a(
     d_miss = CONFIG["d_miss"]
 
     # Load fixed val/test availability matrices (generated once by src/generate_availability.py).
+    avail_dir        = Path(avail_dir)
     val_avail_seed   = CONFIG["availability_seed_val"]
-    val_avail_path   = Path("data/availability") / f"val_availability_seed{val_avail_seed}.npy"
+    val_avail_path   = avail_dir / f"val_availability_seed{val_avail_seed}.npy"
     val_availability = np.load(val_avail_path)
     logger.info("Loaded val availability: shape=%s, path=%s",
                 val_availability.shape, val_avail_path)
 
     test_avail_seed   = CONFIG["availability_seed_test"]
-    test_avail_path   = Path("data/availability") / f"test_availability_seed{test_avail_seed}.npy"
+    test_avail_path   = avail_dir / f"test_availability_seed{test_avail_seed}.npy"
     test_availability = np.load(test_avail_path)
     logger.info("Loaded test availability: shape=%s, path=%s",
                 test_availability.shape, test_avail_path)
@@ -275,7 +277,7 @@ def train_M2a(
     model.freeze_all_backbone()
     p1_trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     logger.info("Phase 1 trainable (trunk + severity_head): %d", p1_trainable)
-    _imgs, _, _slbl, _hsev = next(iter(train_loader))
+    _imgs, _, _slbl, _hsev, _ = next(iter(train_loader))
     logger.info("Data sanity | shape=%s range=[%.1f, %.1f]",
                 tuple(_imgs.shape), _imgs.min().item(), _imgs.max().item())
     _valid_sev = _slbl[_hsev & (_slbl >= 0)]
@@ -306,7 +308,7 @@ def train_M2a(
     for epoch in range(CONFIG["epochs_phase1"]):
         model.train()
         train_loss, n_batches = 0.0, 0
-        for imgs, _, sev_labels, has_severity in train_loader:
+        for imgs, _, sev_labels, has_severity, _ in train_loader:
             optimizer.zero_grad()
             loss = severity_ce_step(model, imgs, sev_labels, has_severity, device)
             if loss is None:
@@ -353,7 +355,7 @@ def train_M2a(
     for epoch in range(epochs_phase2):
         model.train()
         train_loss, n_batches = 0.0, 0
-        for imgs, _, sev_labels, has_severity in train_loader:
+        for imgs, _, sev_labels, has_severity, _ in train_loader:
             optimizer.zero_grad()
             loss = severity_ce_step(model, imgs, sev_labels, has_severity, device)
             if loss is None:
@@ -395,7 +397,7 @@ def train_M2a(
 
     all_scores: list[float] = []
     with torch.no_grad():
-        for imgs, _, _, _ in test_loader:
+        for imgs, _, _, _, _ in test_loader:
             _, sev_logits = model(imgs.to(device))
             p      = torch.softmax(sev_logits, dim=1).cpu()
             # M2/M3 triage score: α̂_i = Σ_k α_k · p_ik  ∈ [0, 10]
@@ -446,8 +448,10 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--seed",               type=int,   default=42)
     p.add_argument("--severity-fraction",  type=float, default=1.0,
                    help="Fraction of severity labels to use (Exp 2 scarcity sweep)")
-    p.add_argument("--output-dir", default="/data/lizhiwei/dfl_v2/results/")
-    p.add_argument("--model-dir",  default="/data/lizhiwei/dfl_v2/models/")
+    p.add_argument("--output-dir", default="/data/lizhiwei/dfl_v2/v5/results/")
+    p.add_argument("--model-dir",  default="/data/lizhiwei/dfl_v2/v5/models/")
+    p.add_argument("--avail-dir",  default="/data/lizhiwei/dfl_v2/v5/availability/",
+                   help="Directory containing pre-generated availability .npy files")
     p.add_argument("--log-level",  default="INFO",
                    choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     p.add_argument("--smoke-test",  action="store_true",
@@ -474,6 +478,7 @@ if __name__ == "__main__":
         severity_fraction=args.severity_fraction,
         output_dir=args.output_dir,
         model_dir=args.model_dir,
+        avail_dir=args.avail_dir,
     )
     print(f"\nDone. Predictions → {pred_csv}")
     print(f"Next: python src/evaluate.py --predictions {pred_csv} "

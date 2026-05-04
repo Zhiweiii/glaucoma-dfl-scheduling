@@ -56,9 +56,8 @@ from config import CONFIG
 from src.dataset import GlaucomaDataset
 from src.evaluate import evaluate
 from src.model import DualHeadVGG19
-from src.allocation import assign_slots, make_K_list, solve_multislot_availability
+from src.allocation import make_K_list, solve_multislot_availability
 from src.losses import scheduling_cost_multislot
-from src.simulate_availability import simulate_availability
 
 logger = logging.getLogger(__name__)
 
@@ -148,6 +147,8 @@ def dfl_step(
     imgs: torch.Tensor,
     sev_labels: torch.Tensor,
     has_severity: torch.Tensor,
+    patient_idx: torch.Tensor,
+    train_availability: np.ndarray,
     alpha: torch.Tensor,
     beta: float,
     K_frac_list: list[float],
@@ -163,6 +164,9 @@ def dfl_step(
     The surrogate loss L = (α̂ · ĝ).sum() has ∂L/∂α̂ = ĝ, where ĝ is the
     score-function gradient estimate of ∇_α̂ E_ε[C(z*(α̂+σε))].
 
+    Availability is fixed per patient (pre-generated, same cohort throughout
+    training) and indexed by patient_idx.  Only ε is randomised across MC samples.
+
     Returns None if the batch has fewer than 4 severity-labeled samples
     (K would be 0 or the allocation trivial).
     """
@@ -174,14 +178,17 @@ def dfl_step(
     if n_sev < 4:
         return None
 
+    # Slice the pre-fixed availability matrix to this batch's severity-labeled patients.
+    sev_idx   = patient_idx[mask.cpu()].numpy()
+    avail_batch = train_availability[sev_idx]                # (n_sev, T)
+
     # Forward pass on severity-labeled subset
-    _, sev_logits = model(imgs[mask])                        # (N, 5)
-    p         = torch.softmax(sev_logits, dim=1)             # (N, 5)
-    alpha_hat = (p * alpha.unsqueeze(0)).sum(dim=1)          # (N,) ∈ [0, 10]
+    _, sev_logits = model(imgs[mask])                        # (n_sev, 5)
+    p         = torch.softmax(sev_logits, dim=1)             # (n_sev, 5)
+    alpha_hat = (p * alpha.unsqueeze(0)).sum(dim=1)          # (n_sev,) ∈ [0, 10]
 
     N      = n_sev
     K_list = make_K_list(N, K_frac_list)
-    T      = len(K_frac_list)
 
     # Accumulate perturbation gradient estimate entirely in no_grad.
     # Score-function identity: ∇_α̂ E_ε[C] = (1/σ) E_ε[C · ε]
@@ -189,13 +196,6 @@ def dfl_step(
     #   ĝ ≈ (1/Mσ) Σ_m (C_m/N − baseline) · ε_m
     # Dividing by N removes batch-size dependence; subtracting the MC mean
     # baseline reduces variance without biasing the estimator.
-    #
-    # Availability: sample once for this batch (seed=None → stochastic each call),
-    # then share the SAME matrix across all M perturbations so the gradient measures
-    # "what happens when scores change, holding constraints fixed."
-    # CRITICAL: sized for n_sev (the severity-labeled subset), not the full batch.
-    avail_batch = simulate_availability(N, T, p_available=CONFIG["p_available"], seed=None)
-
     with torch.no_grad():
         ahat_d = alpha_hat.detach()
         costs: list[torch.Tensor] = []
@@ -248,7 +248,7 @@ def val_decision_cost(
     all_labels: list[torch.Tensor] = []
 
     with torch.no_grad():
-        for imgs, _, sev_labels, has_severity in loader:
+        for imgs, _, sev_labels, has_severity, _ in loader:
             imgs         = imgs.to(device)
             sev_labels   = sev_labels.to(device)
             has_severity = has_severity.to(device)
@@ -285,7 +285,7 @@ def val_severity_ce(
     model.eval()
     total, n = 0.0, 0
     with torch.no_grad():
-        for imgs, _, sev_labels, has_severity in loader:
+        for imgs, _, sev_labels, has_severity, _ in loader:
             imgs         = imgs.to(device)
             sev_labels   = sev_labels.to(device)
             has_severity = has_severity.to(device)
@@ -306,6 +306,7 @@ def train_M3(
     severity_fraction: float = 1.0,
     output_dir: str | Path = "results",
     model_dir: str | Path = "models",
+    avail_dir: str | Path = "/data/lizhiwei/dfl_v2/v5/availability",
 ) -> Path:
     """
     Train M3 (warm-start + DFL) and write results/M3_seed{seed}.csv.
@@ -326,18 +327,25 @@ def train_M3(
     delay  = torch.tensor(CONFIG["delay"], dtype=torch.float32).to(device)
     d_miss = CONFIG["d_miss"]
 
-    # Load fixed val/test availability matrices (generated once by src/generate_availability.py).
+    # Load fixed val/test/train availability matrices (generated once by src/generate_availability.py).
+    avail_dir        = Path(avail_dir)
     val_avail_seed   = CONFIG["availability_seed_val"]
-    val_avail_path   = Path("data/availability") / f"val_availability_seed{val_avail_seed}.npy"
+    val_avail_path   = avail_dir / f"val_availability_seed{val_avail_seed}.npy"
     val_availability = np.load(val_avail_path)
     logger.info("Loaded val availability: shape=%s, path=%s",
                 val_availability.shape, val_avail_path)
 
     test_avail_seed   = CONFIG["availability_seed_test"]
-    test_avail_path   = Path("data/availability") / f"test_availability_seed{test_avail_seed}.npy"
+    test_avail_path   = avail_dir / f"test_availability_seed{test_avail_seed}.npy"
     test_availability = np.load(test_avail_path)
     logger.info("Loaded test availability: shape=%s, path=%s",
                 test_availability.shape, test_avail_path)
+
+    train_avail_seed   = CONFIG["availability_seed_train"]
+    train_avail_path   = avail_dir / f"train_availability_seed{train_avail_seed}.npy"
+    train_availability = np.load(train_avail_path)
+    logger.info("Loaded train availability: shape=%s, path=%s",
+                train_availability.shape, train_avail_path)
 
     # ── Data ──────────────────────────────────────────────────────────────
     train_loader = make_loader(manifest_csv, "severity_train", CONFIG["batch_size"],
@@ -403,7 +411,7 @@ def train_M3(
         model.train()
         model.features.eval()   # backbone frozen — keep BN stats fixed
         train_loss, n_batches = 0.0, 0
-        for imgs, _, sev_labels, has_severity in train_loader:
+        for imgs, _, sev_labels, has_severity, _ in train_loader:
             optimizer.zero_grad()
             loss = severity_ce_step(model, imgs, sev_labels, has_severity, device)
             if loss is None:
@@ -454,7 +462,7 @@ def train_M3(
     for epoch in range(epochs_phase2):
         model.train()
         train_loss, n_batches = 0.0, 0
-        for imgs, _, sev_labels, has_severity in train_loader:
+        for imgs, _, sev_labels, has_severity, _ in train_loader:
             optimizer.zero_grad()
             loss = severity_ce_step(model, imgs, sev_labels, has_severity, device)
             if loss is None:
@@ -520,10 +528,11 @@ def train_M3(
     for epoch in range(CONFIG["epochs_stage3"]):
         model.train()
         train_surr, n_batches = 0.0, 0
-        for imgs, _, sev_labels, has_severity in dfl_loader:
+        for imgs, _, sev_labels, has_severity, patient_idx in dfl_loader:
             optimizer.zero_grad()
             loss = dfl_step(
                 model, imgs, sev_labels, has_severity,
+                patient_idx, train_availability,
                 alpha, beta, CONFIG["K_frac_list"], delay, d_miss,
                 CONFIG["sigma"], CONFIG["M"], device,
             )
@@ -571,7 +580,7 @@ def train_M3(
 
     all_scores: list[float] = []
     with torch.no_grad():
-        for imgs, _, _, _ in test_loader:
+        for imgs, _, _, _, _ in test_loader:
             _, sev_logits = model(imgs.to(device))
             p      = torch.softmax(sev_logits, dim=1).cpu()
             scores = (p * alpha_cpu.unsqueeze(0)).sum(dim=1)
@@ -620,8 +629,10 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--seed",              type=int,   default=42)
     p.add_argument("--severity-fraction", type=float, default=1.0,
                    help="Fraction of severity labels to use (Exp 2 scarcity sweep)")
-    p.add_argument("--output-dir", default="/data/lizhiwei/dfl_v2/results/")
-    p.add_argument("--model-dir",  default="/data/lizhiwei/dfl_v2/models/")
+    p.add_argument("--output-dir", default="/data/lizhiwei/dfl_v2/v5/results/")
+    p.add_argument("--model-dir",  default="/data/lizhiwei/dfl_v2/v5/models/")
+    p.add_argument("--avail-dir",  default="/data/lizhiwei/dfl_v2/v5/availability/",
+                   help="Directory containing pre-generated availability .npy files")
     p.add_argument("--log-level",  default="INFO",
                    choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     p.add_argument("--smoke-test",  action="store_true",
@@ -648,6 +659,7 @@ if __name__ == "__main__":
         severity_fraction=args.severity_fraction,
         output_dir=args.output_dir,
         model_dir=args.model_dir,
+        avail_dir=args.avail_dir,
     )
     print(f"\nDone. Predictions → {pred_csv}")
     print(f"Next: python src/evaluate.py --predictions {pred_csv} "
