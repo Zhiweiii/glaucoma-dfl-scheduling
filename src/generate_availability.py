@@ -50,6 +50,7 @@ def main() -> None:
 
     for name, (split_name, seed) in splits.items():
         rows = df[df["split"] == split_name]
+        rows = rows[rows["label"] >= 1]   # Phase 2 operates on grades 1–4 only
         N = len(rows)
         avail = simulate_availability(N, args.T, args.p_available, seed=seed)
         path  = out_dir / f"{name}_availability_seed{seed}.npy"

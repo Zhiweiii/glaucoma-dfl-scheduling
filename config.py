@@ -1,7 +1,10 @@
 """
-Shared hyperparameters for all three methods (M1, M2, M3).
+Shared hyperparameters for all methods (M1, M2, M3, M4).
 
-All three methods (M1/M2/M3) share this config for a fair comparison.
+V5 feature-freezing decomposition:
+  Phase 1 (M1): trains full network (backbone + trunk + binary_head) on binary labels.
+  Phase 2 (M2/M3/M4): backbone + trunk frozen from M1; only severity_head is trainable.
+
 Architecture (dropout, activations, fine_tune_at) is hardcoded in model.py to
 match the Keras model exactly.  LRs, epochs, and augmentation derive from
 the Bayesian-optimised TF hyperparameters in src/previous_exp/best_hyperparameters.json.
@@ -39,26 +42,19 @@ CONFIG = {
     # Use balanced class weights to compensate for the glaucoma class imbalance.
     "use_class_weights": TF_BEST_PARAMS["use_class_weights"],  # True
 
-    # ── Stage 1: Two-phase training (M1 and M3-Stage1) ───────────────────
-    # Phase 1 — backbone fully frozen, trunk+head learn at high LR.
-    #   Rationale: trunk is randomly initialised; 8.89e-7 is far too slow for it.
-    #   Mirrors Keras workflow: train frozen model first, then fine-tune.
+    # ── Phase 1: M1 binary training (full network) ────────────────────────
+    # Two-phase: backbone frozen first, then unfrozen from layer 9.
     "lr_head":       1e-4,   # Phase 1: trunk + binary_head (randomly initialised)
-    "epochs_phase1": 20,     # Phase 1 length (fixed, no early stopping)
-    # Phase 2 — backbone unfrozen from layer 9; two separate LRs via param groups.
-    #   Backbone (newly unfrozen):  very low LR so ImageNet features aren't destroyed.
-    #   Trunk + head:               Keras fine-tuning LR — trunk may not be fully
-    #                               converged after Phase 1, so keep it learning at
-    #                               the same rate the Keras model used post-load.
-    "lr_finetune":       TF_BEST_PARAMS["fine_tuning_learning_rate_adam"] * 0.1,  # ~8.89e-7 (backbone only)
-    "lr_trunk_phase2":   TF_BEST_PARAMS["fine_tuning_learning_rate_adam"],         # ~8.89e-6 (trunk + head)
-    "epochs_stage1": 50,     # total Phase1+Phase2 budget (Phase 2 gets 50-20=30 epochs)
+    "lr_finetune":   TF_BEST_PARAMS["fine_tuning_learning_rate_adam"] * 0.1,  # ~8.89e-7 (backbone)
+    "lr_trunk_phase2": TF_BEST_PARAMS["fine_tuning_learning_rate_adam"],       # ~8.89e-6 (trunk+head)
+    "epochs_phase1": 20,     # Phase 1 length (frozen backbone)
+    "epochs_stage1": 50,     # total M1 budget (Phase 2 gets 50-20=30 epochs)
 
-    # ── Stage 2: Severity calibration  (M2 and M3-Stage2) ─────────────────
-    "lr_stage2":     1e-4,
-    "epochs_stage2": 30,
+    # ── Phase 2: Severity head training (M2/M3/M4 — frozen backbone+trunk) ──
+    # lr_head (above) is reused for the single-phase severity head training.
+    "epochs_stage2": 30,     # CE training epochs for severity_head
 
-    # ── Stage 3: DFL fine-tuning  (M3 only) ───────────────────────────────
+    # ── Stage 3: DFL fine-tuning (M4 only) ────────────────────────────────
     "lr_stage3":         1e-5,
     "epochs_stage3":     20,
     "sigma":             0.5,   # perturbation noise std for randomised smoothing

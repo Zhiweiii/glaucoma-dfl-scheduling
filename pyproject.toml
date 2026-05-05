@@ -12,6 +12,7 @@ requires-python = ">=3.12"
 dependencies = [
     "eye-ai",
     "notebook>=7.4.7",
+    "gurobipy>=11.0.0",
 ]
 
 [project.optional-dependencies]

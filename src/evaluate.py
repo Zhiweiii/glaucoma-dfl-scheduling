@@ -1,7 +1,7 @@
 """
 Framework-agnostic evaluation: prediction CSV → scheduling metrics JSON.
 
-Works identically for M1, M2b, M3, and the legacy Keras M1 — any model that
+Works identically for M2, M3, M4, and the legacy Keras M1 — any model that
 can write the prediction CSV format.
 
 Problem: multi-slot scheduling.  Patients are assigned to one of T time slots
@@ -114,7 +114,8 @@ def oracle_cost(
     N      = len(oracle_scores)
     K_list = [max(1, int(f * N)) for f in K_frac_list]
     if availability is not None:
-        z_oracle = solve_multislot_availability(oracle_scores, K_list, availability)
+        z_oracle = solve_multislot_availability(oracle_scores, K_list, availability,
+                                                delay=delay, d_miss=d_miss, beta=beta)
     else:
         z_oracle = assign_slots(oracle_scores, K_frac_list)
     return scheduling_cost(z_oracle, true_severity, alpha, delay, beta, d_miss)
@@ -146,7 +147,8 @@ def random_cost(
     if availability is not None:
         for s in range(n_samples):
             rng = np.random.RandomState(seed * 10000 + s)
-            z   = solve_multislot_availability(rng.rand(N), K_list, availability)
+            z   = solve_multislot_availability(rng.rand(N), K_list, availability,
+                                               delay=delay, d_miss=d_miss, beta=beta)
             costs.append(scheduling_cost(z, true_severity, alpha, delay, beta, d_miss))
     else:
         rng = np.random.RandomState(seed)
@@ -229,8 +231,9 @@ def evaluate(
                       When severity_only=True, this array must be pre-filtered to
                       the same severity 1–4 rows before being passed here.
         severity_only: if True (default), restrict evaluation to true_severity >= 1.
-                      Excludes grade-0 patients whose ranking is trivially correct due
-                      to cohort-level imaging differences (see docs/cohort_confound_issue.md).
+                      Grade-0 is excluded by design — Phase 2 operates on grades 1–4
+                      only (backbone + trunk are frozen from M1; the severity head is
+                      trained and evaluated within the clinical cohort exclusively).
                       AUC reports severe (Y≥3) vs mild (Y=1,2) discrimination.
 
     Returns dict with keys:
@@ -268,7 +271,8 @@ def evaluate(
         )
 
     if availability is not None:
-        z_model = solve_multislot_availability(scores, K_list, availability)
+        z_model = solve_multislot_availability(scores, K_list, availability,
+                                               delay=delay, d_miss=d_miss, beta=beta)
     else:
         z_model = assign_slots(scores, K_frac_list)
     C_total  = scheduling_cost(z_model, labels, alpha, delay, beta, d_miss)
@@ -277,7 +281,7 @@ def evaluate(
                            availability=availability)
 
     if severity_only:
-        # AUC: severe (Y≥3) vs mild (Y=1,2); grade-0 excluded above
+        # AUC: severe (Y≥3) vs mild (Y=1,2); grade-0 excluded by design
         binary_labels = (labels >= 3).astype(int)
     else:
         binary_labels = (labels > 0).astype(int)
@@ -319,8 +323,8 @@ def _parse_args() -> argparse.Namespace:
                         "If given, model/oracle/random all use availability-constrained solver. "
                         "When --severity-only, this matrix must be pre-filtered to severity 1–4 rows.")
     p.add_argument("--severity-only", dest="severity_only", action="store_true", default=True,
-                   help="Evaluate on severity 1–4 only, excluding grade-0 patients "
-                        "(recommended; see docs/cohort_confound_issue.md)")
+                   help="Evaluate on severity 1–4 only (default; grade-0 excluded by design "
+                        "since Phase 2 operates within the clinical cohort only)")
     p.add_argument("--no-severity-only", dest="severity_only", action="store_false",
                    help="Include all severity levels (grade-0 through 4) in evaluation")
     p.add_argument("--output",      required=True, help="Output JSON path")
