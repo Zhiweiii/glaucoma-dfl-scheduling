@@ -221,7 +221,14 @@ def dfl_step(
         for c, e in zip(costs_t, eps_list):
             grad_est += (c - baseline) * e / (M * sigma)
 
-    logger.debug("DFL grad_est norm: %.4f", grad_est.norm().item())
+    logger.info(
+        "DFL diag | alpha_hat: mean=%.3f std=%.3f min=%.3f max=%.3f | "
+        "C_m: mean=%.2f std=%.4f | grad_est norm=%.6f",
+        ahat_d.mean().item(), ahat_d.std().item(),
+        ahat_d.min().item(), ahat_d.max().item(),
+        costs_t.mean().item(), costs_t.std().item(),
+        grad_est.norm().item(),
+    )
 
     # Surrogate: ∂(α̂ · ĝ_detached)/∂θ = ĝ · ∂α̂/∂θ  (correct gradient direction)
     return (alpha_hat * grad_est).sum()
@@ -378,28 +385,31 @@ def train_M4(
     logger.info("Loaded M1 checkpoint → %s", m1_ckpt)
 
     # ── Stage 2: Severity CE — identical to M3 ────────────────────────────
-    # Freeze backbone + trunk; train severity_head only.
-    # Checkpoint selection by validation scheduling cost.
-    for name, param in model.named_parameters():
-        if "severity_head" not in name:
-            param.requires_grad = False
+    # Freeze backbone layers 0-8; unfreeze layers 9+, trunk, severity_head.
+    # binary_head is frozen (unused). Checkpoint by validation scheduling cost.
+    model.freeze_backbone_for_finetune()
+    for p in model.binary_head.parameters():
+        p.requires_grad = False
 
-    s2_trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    s2_trainable     = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    backbone_params  = [p for p in model.features.parameters() if p.requires_grad]
+    trunk_sev_params = list(model.trunk.parameters()) + list(model.severity_head.parameters())
     logger.info(
-        "=== M4 Stage 2: severity_head only | trainable=%d | lr=%.2e | epochs=%d ===",
-        s2_trainable, CONFIG["lr_head"], CONFIG["epochs_stage2"],
+        "=== M4 Stage 2: backbone[9+] lr=%.2e | trunk+sev_head lr=%.2e | "
+        "trainable=%d | epochs=%d ===",
+        CONFIG["lr_finetune"], CONFIG["lr_head"], s2_trainable, CONFIG["epochs_stage2"],
     )
 
     stage2_ckpt   = model_dir / f"M4_stage2_seed{seed}.pt"
     best_val_cost = float("inf")
     patience_ctr  = 0
-    optimizer     = torch.optim.Adam(
-        model.severity_head.parameters(), lr=CONFIG["lr_head"]
-    )
+    optimizer     = torch.optim.Adam([
+        {"params": backbone_params,  "lr": CONFIG["lr_finetune"]},
+        {"params": trunk_sev_params, "lr": CONFIG["lr_head"]},
+    ])
 
     for epoch in range(CONFIG["epochs_stage2"]):
-        model.eval()
-        model.severity_head.train()
+        model.train()
         train_loss, n_batches = 0.0, 0
         for imgs, _, sev_labels, has_severity, _ in train_loader:
             optimizer.zero_grad()
@@ -432,12 +442,11 @@ def train_M4(
     logger.info("Stage 2 best val cost: %.4f", best_val_cost)
 
     # ── Stage 3: DFL fine-tuning (SOLVER IN LOOP) ─────────────────────────
-    # Reload Stage 2 best; backbone + trunk remain frozen throughout.
+    # Reload Stage 2 best; keep same freeze setup (backbone[9+] + trunk + sev_head).
     model.load_state_dict(torch.load(stage2_ckpt, map_location=device, weights_only=True))
-
-    for name, param in model.named_parameters():
-        if "severity_head" not in name:
-            param.requires_grad = False
+    model.freeze_backbone_for_finetune()
+    for p in model.binary_head.parameters():
+        p.requires_grad = False
 
     # `final_ckpt` is pre-populated with Stage 2 best as a fallback.
     # Stage 3 overwrites it only when val cost improves, so the final model
@@ -450,19 +459,19 @@ def train_M4(
     patience_ctr     = 0
     n3_trainable     = sum(p.numel() for p in model.parameters() if p.requires_grad)
     logger.info(
-        "=== M4 Stage 3: DFL | severity_head only | trainable=%d | lr=%.2e | "
+        "=== M4 Stage 3: DFL | backbone[9+]+trunk+sev_head | trainable=%d | lr=%.2e | "
         "epochs=%d | sigma=%.2f | M=%d ===",
         n3_trainable, CONFIG["lr_stage3"], CONFIG["epochs_stage3"],
         CONFIG["sigma"], CONFIG["M"],
     )
 
     optimizer = torch.optim.Adam(
-        model.severity_head.parameters(), lr=CONFIG["lr_stage3"]
+        [p for p in model.parameters() if p.requires_grad],
+        lr=CONFIG["lr_stage3"],
     )
 
     for epoch in range(CONFIG["epochs_stage3"]):
-        model.eval()
-        model.severity_head.train()
+        model.train()
         train_surr, n_batches = 0.0, 0
         for imgs, _, sev_labels, has_severity, patient_idx in dfl_loader:
             optimizer.zero_grad()

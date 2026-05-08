@@ -55,10 +55,10 @@ CONFIG = {
     "epochs_stage2": 30,     # CE training epochs for severity_head
 
     # ── Stage 3: DFL fine-tuning (M4 only) ────────────────────────────────
-    "lr_stage3":         1e-5,
+    "lr_stage3":         1e-4,
     "epochs_stage3":     20,
     "sigma":             0.5,   # perturbation noise std for randomised smoothing
-    "M":                 20,    # Monte Carlo samples per training step
+    "M":                 50,    # Monte Carlo samples per training step
     "batch_size_stage3": 256,   # larger batch → K_list [12,25,51] vs test [16,33,66]
 
     # ── Common ─────────────────────────────────────────────────────────────

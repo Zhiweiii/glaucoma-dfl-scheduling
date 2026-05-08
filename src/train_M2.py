@@ -260,7 +260,7 @@ def train_M2(
     logger.info("Train batches: %d | Val batches: %d | Test batches: %d",
                 len(train_loader), len(val_loader), len(test_loader))
 
-    # ── Model: load M1 checkpoint, freeze backbone + trunk ───────────────
+    # ── Model: load M1 checkpoint, unfreeze trunk + backbone[9+] ───────────
     m1_ckpt = model_dir / f"M1_seed{seed}.pt"
     if not m1_ckpt.exists():
         raise FileNotFoundError(
@@ -271,12 +271,14 @@ def train_M2(
     model.load_state_dict(torch.load(m1_ckpt, map_location=device, weights_only=True))
     logger.info("Loaded M1 checkpoint → %s", m1_ckpt)
 
-    for name, param in model.named_parameters():
-        if "severity_head" not in name:
-            param.requires_grad = False
+    # Freeze backbone layers 0-8; unfreeze layers 9+ (same as M1 Phase 2).
+    # Trunk and severity_head are fully trainable; binary_head is frozen (unused).
+    model.freeze_backbone_for_finetune()
+    for p in model.binary_head.parameters():
+        p.requires_grad = False
 
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    logger.info("Trainable params (severity_head only): %d", trainable)
+    logger.info("Trainable params (backbone[9+] + trunk + severity_head): %d", trainable)
 
     _imgs, _, _slbl, _hsev, _ = next(iter(train_loader))
     logger.info("Data sanity | shape=%s range=[%.1f, %.1f]",
@@ -287,19 +289,23 @@ def train_M2(
                 if len(_valid_sev) > 0 else "no sev labels in first batch")
     del _imgs, _slbl, _hsev, _valid_sev
 
-    # ── Training: CE on severity_head, checkpoint by val CE ──────────────
-    checkpoint_path = model_dir / f"M2_seed{seed}.pt"
-    best_val_ce     = float("inf")
-    patience_ctr    = 0
-    optimizer       = torch.optim.Adam(
-        model.severity_head.parameters(), lr=CONFIG["lr_head"]
+    # ── Training: CE on trunk+severity_head, checkpoint by val CE ──────────
+    checkpoint_path  = model_dir / f"M2_seed{seed}.pt"
+    best_val_ce      = float("inf")
+    patience_ctr     = 0
+    backbone_params  = [p for p in model.features.parameters() if p.requires_grad]
+    trunk_sev_params = list(model.trunk.parameters()) + list(model.severity_head.parameters())
+    optimizer        = torch.optim.Adam([
+        {"params": backbone_params,  "lr": CONFIG["lr_finetune"]},
+        {"params": trunk_sev_params, "lr": CONFIG["lr_head"]},
+    ])
+    logger.info(
+        "=== M2 Training: backbone[9+] lr=%.2e | trunk+sev_head lr=%.2e | epochs=%d ===",
+        CONFIG["lr_finetune"], CONFIG["lr_head"], CONFIG["epochs_stage2"],
     )
-    logger.info("=== M2 Training: severity_head only | lr=%.2e | epochs=%d ===",
-                CONFIG["lr_head"], CONFIG["epochs_stage2"])
 
     for epoch in range(CONFIG["epochs_stage2"]):
-        model.eval()
-        model.severity_head.train()
+        model.train()
         train_loss, n_batches = 0.0, 0
         for imgs, _, sev_labels, has_severity, _ in train_loader:
             optimizer.zero_grad()
