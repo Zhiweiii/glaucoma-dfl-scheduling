@@ -371,12 +371,11 @@ def train_M1(
     pred_df.to_csv(pred_csv, index=False)
     logger.info("Predictions saved → %s  (%d rows)", pred_csv, len(pred_df))
 
-    # Evaluate on severity 1–4 only (exclude grade-0; see docs/cohort_confound_issue.md).
-    # Pre-filter the availability matrix to the same rows so shapes match.
-    sev_mask = (test_ds.df["label"] >= 1).values
+    # Evaluate on severity 1–4 only. The V5 availability matrix is already
+    # generated after the same grade >= 1 filter used by evaluate.py.
     metrics = evaluate(pred_csv, alpha=CONFIG["alpha"], beta=CONFIG["beta"],
                        K_frac_list=CONFIG["K_frac_list"], delay=CONFIG["delay"],
-                       d_miss=CONFIG["d_miss"], availability=test_availability[sev_mask],
+                       d_miss=CONFIG["d_miss"], availability=test_availability,
                        severity_only=True)
     metrics_path = output_dir / f"M1_seed{seed}_metrics.json"
     with open(metrics_path, "w") as f:

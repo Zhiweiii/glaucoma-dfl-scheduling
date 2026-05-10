@@ -28,7 +28,7 @@ CONFIG = {
     "K_frac_list": [0.05, 0.10, 0.20],        # capacity per slot as fraction of N
 
     # ── Availability constraints ───────────────────────────────────────────
-    "p_available":           0.7,   # Bernoulli prob each patient is available per slot
+    "p_available":           [0.25, 0.50, 1.00],  # per-slot availability (r=5x K_frac); exp1 used 0.7 (uniform)
     "availability_seed_train":  0,  # seed for fixed train availability matrix
     "availability_seed_val":  100,  # seed for fixed val availability matrix
     "availability_seed_test": 200,  # seed for fixed test availability matrix
