@@ -42,10 +42,12 @@ def main() -> None:
                         "Mutually exclusive with --p-available.")
     p.add_argument("--T",           type=int,   default=3,
                    help="Number of scheduling slots")
-    p.add_argument("--seed-train",  type=int,   default=0)
-    p.add_argument("--seed-val",    type=int,   default=100)
-    p.add_argument("--seed-test",   type=int,   default=200)
-    p.add_argument("--out-dir",     default="/data/lizhiwei/dfl_v2/v5/availability_r5")
+    p.add_argument("--seed-train",      type=int,   default=0)
+    p.add_argument("--seed-val",        type=int,   default=100)
+    p.add_argument("--seed-test",       type=int,   default=200)
+    p.add_argument("--extra-val-seeds", type=int,   nargs="*", default=[],
+                   help="Additional val availability seeds to generate (e.g. 101 102 103 104)")
+    p.add_argument("--out-dir",         default="/data/lizhiwei/dfl_v2/v5/availability_r5")
     args = p.parse_args()
 
     # Resolve p_available
@@ -83,6 +85,21 @@ def main() -> None:
               f"p={p_available}, seed={seed} → {path}")
         per_slot = avail.sum(axis=0).tolist()
         print(f"  Available per slot: {per_slot}  |  patients with 0 slots: {zero_slots}")
+
+    # Extra val availability matrices for multi-realization checkpoint selection.
+    if args.extra_val_seeds:
+        val_rows = df[df["split"] == "severity_val"]
+        val_rows = val_rows[val_rows["label"] >= 1]
+        N_val    = len(val_rows)
+        for seed in args.extra_val_seeds:
+            avail = simulate_availability(N_val, args.T, p_available, seed=seed)
+            path  = out_dir / f"val_availability_seed{seed}.npy"
+            np.save(path, avail)
+            zero_slots = int((avail.sum(axis=1) == 0).sum())
+            print(f"Saved extra val availability: N={N_val}, T={args.T}, "
+                  f"p={p_available}, seed={seed} → {path}")
+            per_slot = avail.sum(axis=0).tolist()
+            print(f"  Available per slot: {per_slot}  |  patients with 0 slots: {zero_slots}")
 
 
 if __name__ == "__main__":
