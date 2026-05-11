@@ -91,9 +91,13 @@ class GlaucomaDataset(Dataset):
         split: str = "train",
         severity_fraction: float = 1.0,
         seed: int = 42,
+        exclude_grade0: bool = False,
     ) -> None:
         df = pd.read_csv(csv_path)
         self.df = df[df["split"] == split].reset_index(drop=True)
+
+        if exclude_grade0:
+            self.df = self.df[self.df["label"] >= 1].reset_index(drop=True)
 
         # Severity scarcity subsampling (Exp 2 only — skip at fraction=1.0).
         # Stratified by severity class so rare classes (e.g. 3, 4) are not wiped
