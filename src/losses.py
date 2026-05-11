@@ -12,10 +12,15 @@ def scheduling_cost_multislot(
     d_miss: float,
 ) -> torch.Tensor:
     """
-    Multi-slot scheduling cost (fully differentiable in z).
+    Multi-slot scheduling cost.
 
     C(z, Y) = Σ_i Σ_t z_{i,t} (α_{Yi}·delay[t] + β)
              + Σ_i (1 − Σ_t z_{i,t}) α_{Yi}·d_miss
+
+    Note: the miss-penalty term uses a hard Boolean mask (assigned == 0), so
+    gradients do not flow through it. This function is intended to be called
+    inside torch.no_grad() as a scalar weight in the REINFORCE estimator.
+    Do not use directly in a differentiable forward pass.
 
     Args:
         z:      (N, T) assignment matrix
