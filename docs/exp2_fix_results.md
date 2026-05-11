@@ -86,9 +86,7 @@ be at a saddle point in the DFL objective from which Stage 3 cannot escape in 20
 
 ---
 
-## Should We Sweep Larger σ?
-
-**Short answer: one more point (σ=8.0) is worth trying, but we are likely near the plateau.**
+## Sigma Sweep Results
 
 Full sweep σ ∈ {0.5, 1.0, 2.0, 4.0, 6.0, 8.0} was run. Results:
 
