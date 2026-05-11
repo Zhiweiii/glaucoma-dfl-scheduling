@@ -13,6 +13,7 @@ dependencies = [
     "eye-ai",
     "notebook>=7.4.7",
     "gurobipy>=11.0.0",
+    "seaborn>=0.13.2",
 ]
 
 [project.optional-dependencies]
