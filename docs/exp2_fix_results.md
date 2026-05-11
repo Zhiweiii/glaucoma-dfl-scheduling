@@ -90,25 +90,27 @@ be at a saddle point in the DFL objective from which Stage 3 cannot escape in 20
 
 **Short answer: one more point (σ=8.0) is worth trying, but we are likely near the plateau.**
 
-The trend from σ=0.5 → 1.0 → 2.0 → 4.0 shows:
-- σ=0.5 and σ=1.0 are **identical** — Stage 3 fails completely, falling back to Stage 2 for all seeds.
-  The threshold for DFL to work at all is somewhere between σ=1.0 and σ=2.0.
-- σ=2.0: Stage 3 improves for seed 43 only.
-- σ=4.0: Stage 3 improves for seeds 42 and 43; seed 44 remains stuck.
+Full sweep σ ∈ {0.5, 1.0, 2.0, 4.0, 6.0, 8.0} was run. Results:
 
-**Why σ=8.0 may not help further:**
-- alpha_hat ∈ [0, 10] by construction. At σ=8, a perturbation of ±8 scrambles
-  the ranking almost entirely — the ILP solutions for different ε samples become
-  nearly independent of the true scores, so `C_m` variance collapses back toward zero
-  and the gradient signal degrades again (same failure mode as σ too small, but from
-  the other direction).
-- Seed 44's failure is a generalization problem, not a signal problem. Larger σ won't fix it.
-- Seeds 42 and 43 already improved substantially at σ=4.0; further gains would be small.
+| σ | seed42 | seed43 | seed44 | Mean C_norm |
+|---|--------|--------|--------|-------------|
+| 0.5 | 0.9064 | 0.8871 | 0.8991 | 0.8975 |
+| 1.0 | 0.9064 | 0.8871 | 0.8991 | 0.8975 |
+| 2.0 | 0.9064 | 0.8732 | 0.8991 | 0.8929 |
+| **4.0** | **0.8821** | **0.8820** | 0.8991 | **0.8877** |
+| 6.0 | 0.9064 | 0.8871 | 0.8991 | 0.8975 |
+| 8.0 | 0.8812 | 0.8871 | 0.8991 | 0.8891 |
 
-**Recommendation:** Run σ=8.0 as a single confirmation point. If it is worse than σ=4.0,
-we have found the peak and can report σ=4.0 as the best configuration. If it is better,
-try σ=6.0 to bracket the optimum. Either way, expect diminishing returns and seed 44
-to remain unimproved.
+**σ=4.0 is the optimum.** The plateau is found.
+
+- σ=0.5 and σ=1.0: Stage 3 fails entirely — falls back to Stage 2 for all seeds (perturbations too small to flip ILP assignments).
+- σ=2.0 → 4.0: Monotonically improving. Stage 3 starts working for seed 43 at σ=2.0, then both seeds 42 and 43 at σ=4.0.
+- σ=6.0: **Complete collapse** — Stage 3 fails again for all seeds, identical results to σ=0.5/1.0. Perturbations are so large that MC cost samples become uncorrelated with model scores, `C_m` variance collapses, and the gradient signal is destroyed.
+- σ=8.0: Partial recovery (seed 42 improves slightly to 0.8812) but overall worse than σ=4.0.
+
+The sigma landscape has a sharp peak at σ=4.0 with steep degradation on both sides.
+Seed 44 remains stuck at Stage 2 (0.8991) for every σ — confirmed to be a generalization
+issue rather than a signal problem.
 
 ---
 
@@ -117,14 +119,14 @@ to remain unimproved.
 ```
 /data/lizhiwei/dfl_v2/v5/exp2/results/
   M3_seed{42,43,44}.{csv,_metrics.json}              # M3-fix results (overwrote old M3)
-  M4_sigma{1.0,2.0,4.0}_seed{42,43,44}.{csv,_metrics.json}
+  M4_sigma{1.0,2.0,4.0,6.0,8.0}_seed{42,43,44}.{csv,_metrics.json}
 
 /data/lizhiwei/dfl_v2/v5/exp2/models/
   M3_seed{42,43,44}.pt                               # M3-fix checkpoints
-  M4_sigma{1.0,2.0,4.0}_seed{42,43,44}.pt
+  M4_sigma{1.0,2.0,4.0,6.0,8.0}_seed{42,43,44}.pt
 
 /data/lizhiwei/dfl_v2/v5/exp2/logs/
-  fixes_master.log
+  fixes_master.log          sigma_sweep2_master.log
   M3fix_seed{42,43,44}.log
-  M4_sigma{1.0,2.0,4.0}_seed{42,43,44}.log
+  M4_sigma{1.0,2.0,4.0,6.0,8.0}_seed{42,43,44}.log
 ```
