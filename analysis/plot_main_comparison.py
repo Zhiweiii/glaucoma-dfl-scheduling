@@ -51,19 +51,10 @@ for i, key in enumerate(labels):
     ax.scatter([x[i]] * len(SEEDS), all_vals[key],
                color="black", s=20, zorder=5, alpha=0.7)
 
-# Random reference line (visible in range)
+# Oracle and random reference lines
+ax.axhline(C_ORACLE / C_RANDOM, color="#1a9641", lw=1.5, ls="--", zorder=2,
+           label=f"Oracle  ({C_ORACLE/C_RANDOM:.3f})")
 ax.axhline(1.0, color="#d73027", lw=1.5, ls=":", zorder=2, label="Random  (1.000)")
-
-# Oracle is below the y-axis range — annotate with a downward arrow instead
-oracle_cnorm = C_ORACLE / C_RANDOM  # 0.780
-y_bottom = 0.84
-ax.annotate(
-    f"Oracle = {oracle_cnorm:.3f} (below range)",
-    xy=(x[-1] + width / 2 + 0.05, y_bottom),
-    xytext=(x[-1] + width / 2 + 0.05, y_bottom + 0.018),
-    ha="right", va="bottom", fontsize=9, color="#1a9641",
-    arrowprops=dict(arrowstyle="-|>", color="#1a9641", lw=1.2),
-)
 
 # Formatting
 ax.set_xticks(x)
@@ -71,7 +62,7 @@ ax.set_xticklabels([METHODS[k][1] for k in labels], fontsize=11)
 ax.set_ylabel(r"$C_{\mathrm{norm}}$ = $C_{\mathrm{total}}$ / $C_{\mathrm{random}}$  (↓ better)", fontsize=11)
 ax.set_title("Scheduling Performance — Main Method Comparison\n(test set, N=333, seeds 42/43/44)",
              fontsize=12)
-ax.set_ylim(0.84, 1.02)
+ax.set_ylim(0.76, 1.02)
 ax.yaxis.grid(True, lw=0.5, alpha=0.5, zorder=0)
 ax.set_axisbelow(True)
 ax.legend(fontsize=10, loc="upper right")

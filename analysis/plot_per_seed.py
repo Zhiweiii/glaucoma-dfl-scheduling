@@ -61,7 +61,8 @@ legend_elements = [
     Line2D([0], [0], color="#2166ac", lw=1.8, label="seed 43 (improved)"),
     Line2D([0], [0], color="#d73027", lw=1.8, ls="--", label="seed 44 (Stage 3 stuck)"),
 ]
-ax.legend(handles=legend_elements, fontsize=9, loc="center right")
+ax.legend(handles=legend_elements, fontsize=7.5, loc="center right",
+          handlelength=1.2, handletextpad=0.4, borderpad=0.4, labelspacing=0.3)
 
 fig.tight_layout()
 for ext in ("pdf", "png"):
