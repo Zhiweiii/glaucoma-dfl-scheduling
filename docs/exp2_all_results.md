@@ -21,7 +21,7 @@ All results are from the test set (N=333, K=[16, 33, 66]).
 | `K_frac_list` (slot capacities) | [0.05, 0.10, 0.20] → K=[16, 33, 66] |
 
 ### Metrics
-- **C_norm**: normalised scheduling cost = (C_total − C_oracle) / (C_random − C_oracle). Lower is better. 0 = oracle, 1 = random.
+- **C_norm**: normalised scheduling cost = C_total / C_random. Lower is better. Oracle = 0.780 (best achievable with perfect labels), Random = 1.000 (baseline).
 - **C_total**: raw scheduling cost on test set
 - **C_oracle**: optimal cost with true severity labels known (lower bound)
 - **C_random**: expected cost under random triage score assignment (baseline)
@@ -87,7 +87,7 @@ M4_sigma8.0,44,0.8991,18143.5,15742.5,20180.422,2401.0,0.4787,0.6828,0.6914,DFL 
 
 | Method | C_norm ↓ | recall@K ↑ | pairwise_acc ↑ | AUC-ROC ↑ |
 |--------|----------|------------|----------------|-----------|
-| Oracle | ~0.000 | — | — | — |
+| Oracle | 0.780 | — | — | — |
 | Random | 1.000 | — | — | — |
 | M1 | 0.9707 ± 0.0063 | 0.3688 ± 0.0067 | 0.5447 ± 0.0119 | 0.5283 ± 0.0155 |
 | M2 | 0.8957 ± 0.0041 | 0.4770 ± 0.0050 | 0.6878 ± 0.0057 | 0.7039 ± 0.0099 |
