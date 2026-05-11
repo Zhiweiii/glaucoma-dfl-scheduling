@@ -51,19 +51,11 @@ for i, key in enumerate(labels):
     ax.scatter([x[i]] * len(SEEDS), all_vals[key],
                color="black", s=20, zorder=5, alpha=0.7)
 
-# Random reference line (visible in range)
-ax.axhline(1.0, color="#d73027", lw=1.5, ls=":", zorder=2, label="Random  (1.000)")
-
-# Oracle is below the y-axis range — annotate with a downward arrow instead
-oracle_cnorm = C_ORACLE / C_RANDOM  # 0.780
-y_bottom = 0.84
-ax.annotate(
-    f"Oracle = {oracle_cnorm:.3f} (below range)",
-    xy=(x[-1] + width / 2 + 0.05, y_bottom),
-    xytext=(x[-1] + width / 2 + 0.05, y_bottom + 0.018),
-    ha="right", va="bottom", fontsize=9, color="#1a9641",
-    arrowprops=dict(arrowstyle="-|>", color="#1a9641", lw=1.2),
-)
+# Oracle and random reference lines
+ax.axhline(C_ORACLE / C_RANDOM, color="#1a9641", lw=1.5, ls="--", zorder=2,
+           label=f"Oracle  ({C_ORACLE/C_RANDOM:.3f})")
+ax.axhline(1.0, color="#d73027", lw=1.5, ls=":", zorder=2,
+           label="Random  (1.000)")
 
 # Formatting
 ax.set_xticks(x)
