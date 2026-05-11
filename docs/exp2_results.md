@@ -120,7 +120,7 @@ val_cost = mean([compute_cost(model, val_loader, avail)
                  for avail in val_availabilities])   # 5 realizations
 ```
 
-New files `M3fix_seed*.csv` in `exp2/results/`.
+Results saved as `M3_seed*.csv` in `exp2/results/` (overwrites original M3 results).
 
 ### Fix 2 — M4: Sigma sweep for DFL perturbation scale
 
@@ -147,14 +147,14 @@ The `--stage3-only` flag skips Stage 2 re-training; Stage 2 checkpoints from `ex
 /data/lizhiwei/dfl_v2/v5/exp2/
   models/   M{1,2,3,4}_seed{42,43,44}.pt
             M4_stage2_seed{42,43,44}.pt
-            M4_sigma{1.0,2.0,4.0}_seed{42,43,44}.pt   [after fixes]
+            M4_sigma{1.0,2.0,4.0,6.0,8.0}_seed{42,43,44}.pt   [after fixes + sigma sweep]
   results/  {M1,M2,M3,M4}_seed{42,43,44}.{csv,_metrics.json}
-            M3fix_seed{42,43,44}.{csv,_metrics.json}   [after fixes]
-            M4_sigma{1.0,2.0,4.0}_seed{42,43,44}.{csv,_metrics.json}
+            M3_seed{42,43,44}.{csv,_metrics.json}              [overwritten with M3-fix]
+            M4_sigma{1.0,2.0,4.0,6.0,8.0}_seed{42,43,44}.{csv,_metrics.json}
   logs/     {M2,M3,M4}_seed{42,43,44}.log
             M3fix_seed{42,43,44}.log
-            M4_sigma{1.0,2.0,4.0}_seed{42,43,44}.log
-            fixes_master.log
+            M4_sigma{1.0,2.0,4.0,6.0,8.0}_seed{42,43,44}.log
+            fixes_master.log   sigma_sweep2_master.log
 
 /data/lizhiwei/dfl_v2/v5/availability_r5/
   train_availability_seed0.npy         shape (1091, 3)

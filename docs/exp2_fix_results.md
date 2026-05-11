@@ -32,7 +32,7 @@ when the cost signal is still relatively noisy.
 ## Fix 2 — M4 Stage 3: Sigma Sweep
 
 **Change:** Stage 3 (DFL) re-run with larger perturbation σ using existing Stage 2 checkpoints
-(`--stage3-only`). σ=0.5 (default) was already run in exp2; new values: 1.0, 2.0, 4.0.
+(`--stage3-only`). σ=0.5 (default) was already run in exp2; sweep covered: 1.0, 2.0, 4.0, 6.0, 8.0.
 
 **Rationale:** With alpha_hat std ≈ 1.5, σ=0.5 is only 0.33× the natural score spread — too small
 to reliably flip ILP assignments across MC samples, giving near-zero cost variance in the

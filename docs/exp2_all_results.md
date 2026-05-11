@@ -21,14 +21,14 @@ All results are from the test set (N=333, K=[16, 33, 66]).
 | `K_frac_list` (slot capacities) | [0.05, 0.10, 0.20] → K=[16, 33, 66] |
 
 ### Metrics
-- **C_norm**: normalised scheduling cost = C_total / C_random. Lower is better. Oracle = 0.780 (best achievable with perfect labels), Random = 1.000 (baseline).
+- **C_norm**: `C_total / C_random`. Lower is better. Oracle = 0.780 (best achievable with perfect labels), Random = 1.000 (baseline).
 - **C_total**: raw scheduling cost on test set
-- **C_oracle**: optimal cost with true severity labels known (lower bound)
-- **C_random**: expected cost under random triage score assignment (baseline)
-- **C_regret**: C_total − C_oracle
-- **recall@K**: fraction of true grade≥3 patients scheduled in slot 1 (most urgent)
-- **pairwise_accuracy**: fraction of grade-discordant pairs ranked correctly by triage score
-- **auc_roc**: AUC-ROC of triage score for separating grade≥2 from grade<2
+- **C_oracle**: optimal cost with true severity labels known (lower bound), solved by Gurobi ILP
+- **C_random**: expected cost under random triage scores (MC average over 1000 draws), using same availability-constrained solver
+- **C_regret**: `C_total − C_oracle` (gap from oracle)
+- **recall@K**: fraction of true grade≥3 patients scheduled in **any** slot
+- **pairwise_accuracy**: fraction of grade-discordant pairs (Y_i ≠ Y_j) where model ranking agrees with label ordering
+- **auc_roc**: AUC-ROC of triage score for separating **grade≥3 (severe) vs grade 1–2 (mild)**
 
 ### Methods
 | Method | Description |
